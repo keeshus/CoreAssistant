@@ -41,15 +41,18 @@ class ChatViewModel(private val settingsManager: SettingsManager) : ViewModel() 
                     return@launch
                 }
 
-                // Note: v0.9.0 does not support Google Grounding via the Tool class in the same way as later versions.
-                // We will leave the structure but remove the unresolved reference.
-                val tools: List<Tool>? = null
-
-                val generativeModel = GenerativeModel(
-                    modelName = modelName,
-                    apiKey = apiKey,
-                    tools = tools
-                )
+                val generativeModel = if (isGroundingEnabled) {
+                    GenerativeModel(
+                        modelName = modelName,
+                        apiKey = apiKey,
+                        tools = listOf(Tool(emptyList()))
+                    )
+                } else {
+                    GenerativeModel(
+                        modelName = modelName,
+                        apiKey = apiKey
+                    )
+                }
 
                 val response = generativeModel.generateContent(userText)
                 _messages.add(ChatMessage(response.text ?: "No response", isUser = false))
