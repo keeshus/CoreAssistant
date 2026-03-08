@@ -1,6 +1,7 @@
 package nl.codeinfinity.coreassistant
 
 import androidx.room.*
+import com.google.gson.Gson
 import kotlinx.coroutines.flow.Flow
 
 @Entity(tableName = "conversations")
@@ -28,8 +29,21 @@ data class MessageEntity(
     val text: String,
     val isUser: Boolean,
     val thought: String? = null,
+    val groundingMetadata: GroundingMetadata? = null,
     val timestamp: Long = System.currentTimeMillis()
 )
+
+class Converters {
+    @TypeConverter
+    fun fromGroundingMetadata(value: GroundingMetadata?): String? {
+        return Gson().toJson(value)
+    }
+
+    @TypeConverter
+    fun toGroundingMetadata(value: String?): GroundingMetadata? {
+        return Gson().fromJson(value, GroundingMetadata::class.java)
+    }
+}
 
 @Dao
 interface ChatDao {
@@ -66,7 +80,8 @@ interface ChatDao {
     suspend fun deleteOldConversations(limit: Int)
 }
 
-@Database(entities = [Conversation::class, MessageEntity::class], version = 1)
+@Database(entities = [Conversation::class, MessageEntity::class], version = 2)
+@TypeConverters(Converters::class)
 abstract class ChatDatabase : RoomDatabase() {
     abstract fun chatDao(): ChatDao
 
@@ -80,7 +95,9 @@ abstract class ChatDatabase : RoomDatabase() {
                     context.applicationContext,
                     ChatDatabase::class.java,
                     "chat_database"
-                ).build()
+                )
+                .fallbackToDestructiveMigration()
+                .build()
                 INSTANCE = instance
                 instance
             }

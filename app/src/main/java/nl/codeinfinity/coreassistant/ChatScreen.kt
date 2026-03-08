@@ -20,8 +20,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
@@ -56,7 +58,8 @@ class ChatViewModel(
                 ChatMessage(
                     text = entity.text,
                     isUser = entity.isUser,
-                    thought = entity.thought
+                    thought = entity.thought,
+                    groundingMetadata = entity.groundingMetadata
                 )
             }
         }
@@ -113,6 +116,11 @@ class ChatViewModel(
 
                 val responseText = response.text ?: "No response"
                 val responseThought = response.thought
+                val groundingMetadata = response.groundingMetadata
+                
+                android.util.Log.d("ChatViewModel", "Response text: $responseText")
+                android.util.Log.d("ChatViewModel", "Response thought: ${if (responseThought != null) "Present" else "Null"}")
+                android.util.Log.d("ChatViewModel", "Grounding metadata: ${if (groundingMetadata != null) "Present" else "Null"}")
 
                 // Save assistant message to DB
                 chatDao.insertMessage(
@@ -120,7 +128,8 @@ class ChatViewModel(
                         conversationId = conversationId,
                         text = responseText,
                         isUser = false,
-                        thought = responseThought
+                        thought = responseThought,
+                        groundingMetadata = groundingMetadata
                     )
                 )
                 _loadingMessage.value = null
@@ -287,6 +296,7 @@ fun ThoughtDrawer(thought: String) {
 @Composable
 fun GroundingDrawer(metadata: GroundingMetadata) {
     var expanded by remember { mutableStateOf(false) }
+    val uriHandler = LocalUriHandler.current
     
     Column(
         modifier = Modifier
@@ -325,13 +335,18 @@ fun GroundingDrawer(metadata: GroundingMetadata) {
                             text = "• ${web.title ?: "Source"}",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.padding(vertical = 2.dp)
+                            modifier = Modifier
+                                .padding(vertical = 2.dp)
+                                .clickable { web.uri?.let { uriHandler.openUri(it) } },
+                            textDecoration = TextDecoration.Underline
                         )
                         Text(
                             text = web.uri ?: "",
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
-                            modifier = Modifier.padding(bottom = 4.dp)
+                            modifier = Modifier
+                                .padding(bottom = 4.dp)
+                                .clickable { web.uri?.let { uriHandler.openUri(it) } }
                         )
                     }
                 }
