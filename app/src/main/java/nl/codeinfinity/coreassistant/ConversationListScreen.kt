@@ -6,6 +6,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -36,6 +37,12 @@ class ConversationListViewModel(private val chatDao: ChatDao, private val settin
             onConversationCreated(id)
         }
     }
+
+    fun deleteConversation(conversation: Conversation) {
+        viewModelScope.launch {
+            chatDao.deleteConversation(conversation)
+        }
+    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -53,6 +60,28 @@ fun ConversationListScreen(
         }
     })
     val conversations by viewModel.conversations.collectAsState()
+    var conversationToDelete by remember { mutableStateOf<Conversation?>(null) }
+
+    if (conversationToDelete != null) {
+        AlertDialog(
+            onDismissRequest = { conversationToDelete = null },
+            title = { Text("Delete Conversation") },
+            text = { Text("Are you sure you want to delete this conversation? This action cannot be undone.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    conversationToDelete?.let { viewModel.deleteConversation(it) }
+                    conversationToDelete = null
+                }) {
+                    Text("Delete", color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { conversationToDelete = null }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
 
     Scaffold(
         topBar = {
@@ -87,6 +116,11 @@ fun ConversationListScreen(
                     ListItem(
                         headlineContent = { Text(conversation.title, maxLines = 1, overflow = TextOverflow.Ellipsis) },
                         supportingContent = { Text("Last active: ${java.text.SimpleDateFormat("MMM dd, HH:mm").format(java.util.Date(conversation.lastModified))}") },
+                        trailingContent = {
+                            IconButton(onClick = { conversationToDelete = conversation }) {
+                                Icon(Icons.Default.Delete, contentDescription = "Delete Conversation", tint = MaterialTheme.colorScheme.error)
+                            }
+                        },
                         modifier = Modifier.clickable { onConversationClick(conversation.id) }
                     )
                     HorizontalDivider()

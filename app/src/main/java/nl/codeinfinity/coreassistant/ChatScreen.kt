@@ -260,8 +260,11 @@ fun MessageBubble(message: ChatMessage) {
                     }
 
                     if (message.groundingMetadata != null) {
-                        Spacer(modifier = Modifier.height(8.dp))
-                        GroundingDrawer(metadata = message.groundingMetadata)
+                        val hasLinks = message.groundingMetadata.groundingChunks?.any { it.web != null } == true
+                        if (hasLinks) {
+                            Spacer(modifier = Modifier.height(8.dp))
+                            GroundingDrawer(metadata = message.groundingMetadata)
+                        }
                     }
                 }
             }
@@ -361,6 +364,13 @@ fun GroundingDrawer(metadata: GroundingMetadata) {
                                 color = MaterialTheme.colorScheme.primary,
                                 textDecoration = TextDecoration.Underline
                             )
+                            web.title?.let { title ->
+                                Text(
+                                    text = " - $title",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
                         }
                     }
                 }
