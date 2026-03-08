@@ -1,0 +1,42 @@
+name: Build and Release APK
+
+on:
+  push:
+    tags:
+      - 'v*'  # Trigger on version tags like v1.0.0
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Set up Java
+        uses: actions/setup-java@v3
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Make gradlew executable
+        run: chmod +x ./gradlew
+
+      - name: Build APK
+        run: ./gradlew assembleRelease
+
+      - name: Sign APK
+        uses: r0adkll/sign-android-release@v1
+        id: sign_app
+        with:
+          releaseDirectory: app/build/outputs/apk/release
+          signingKeyBase64: ${{ secrets.SIGNING_KEY }}
+          alias: ${{ secrets.KEY_ALIAS }}
+          keyStorePassword: ${{ secrets.KEYSTORE_PASSWORD }}
+          keyPassword: ${{ secrets.KEY_PASSWORD }}
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: ${{ steps.sign_app.outputs.signedReleaseFile }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
