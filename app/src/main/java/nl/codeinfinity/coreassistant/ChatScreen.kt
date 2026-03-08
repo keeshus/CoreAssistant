@@ -343,23 +343,25 @@ fun GroundingDrawer(metadata: GroundingMetadata) {
             Column(modifier = Modifier.padding(top = 8.dp)) {
                 metadata.groundingChunks?.forEach { chunk ->
                     chunk.web?.let { web ->
-                        Text(
-                            text = "• ${web.title ?: "Source"}",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.primary,
+                        Row(
                             modifier = Modifier
-                                .padding(vertical = 2.dp)
-                                .clickable { web.uri?.let { uriHandler.openUri(it) } },
-                            textDecoration = TextDecoration.Underline
-                        )
-                        Text(
-                            text = web.uri ?: "",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
-                            modifier = Modifier
-                                .padding(bottom = 4.dp)
+                                .fillMaxWidth()
                                 .clickable { web.uri?.let { uriHandler.openUri(it) } }
-                        )
+                                .padding(vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "•",
+                                style = MaterialTheme.typography.bodySmall,
+                                modifier = Modifier.padding(end = 8.dp)
+                            )
+                            Text(
+                                text = web.title ?: "Source",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.primary,
+                                textDecoration = TextDecoration.Underline
+                            )
+                        }
                     }
                 }
                 
