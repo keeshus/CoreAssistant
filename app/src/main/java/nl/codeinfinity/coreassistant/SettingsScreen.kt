@@ -5,11 +5,15 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -32,6 +36,9 @@ class SettingsViewModel(private val settingsManager: SettingsManager) : ViewMode
 
     val groundingEnabled: StateFlow<Boolean> = settingsManager.googleGroundingEnabled
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
+
+    val conversationsLimit: StateFlow<Int> = settingsManager.conversationsLimit
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 5)
 
     private val _availableModels = mutableStateListOf<GeminiModel>()
     val availableModels: List<GeminiModel> = _availableModels
@@ -77,6 +84,12 @@ class SettingsViewModel(private val settingsManager: SettingsManager) : ViewMode
             settingsManager.saveGoogleGroundingEnabled(enabled)
         }
     }
+
+    fun saveConversationsLimit(limit: String) {
+        viewModelScope.launch {
+            settingsManager.saveConversationsLimit(limit)
+        }
+    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -94,9 +107,11 @@ fun SettingsScreen(
     val apiKey by viewModel.apiKey.collectAsState()
     val selectedModel by viewModel.selectedModel.collectAsState()
     val groundingEnabled by viewModel.groundingEnabled.collectAsState()
+    val conversationsLimit by viewModel.conversationsLimit.collectAsState()
     val availableModels = viewModel.availableModels
 
     var expanded by remember { mutableStateOf(false) }
+    var apiKeyVisible by remember { mutableStateOf(false) }
 
     Scaffold(
         topBar = {
@@ -122,7 +137,16 @@ fun SettingsScreen(
                 onValueChange = { viewModel.saveApiKey(it) },
                 label = { Text("Gemini API Key") },
                 modifier = Modifier.fillMaxWidth(),
-                singleLine = true
+                singleLine = true,
+                visualTransformation = if (apiKeyVisible) VisualTransformation.None else PasswordVisualTransformation(),
+                trailingIcon = {
+                    IconButton(onClick = { apiKeyVisible = !apiKeyVisible }) {
+                        Icon(
+                            imageVector = if (apiKeyVisible) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                            contentDescription = if (apiKeyVisible) "Hide API Key" else "Show API Key"
+                        )
+                    }
+                }
             )
 
             Button(
@@ -161,6 +185,14 @@ fun SettingsScreen(
                     }
                 }
             }
+
+            OutlinedTextField(
+                value = conversationsLimit.toString(),
+                onValueChange = { viewModel.saveConversationsLimit(it) },
+                label = { Text("Max Conversations to Keep") },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true
+            )
 
             Row(
                 modifier = Modifier.fillMaxWidth(),

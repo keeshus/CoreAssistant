@@ -6,9 +6,10 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Search
@@ -18,6 +19,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -25,12 +27,13 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
-import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.launch
-import androidx.compose.ui.platform.LocalContext
-import com.google.gson.Gson
-import com.google.gson.reflect.TypeToken
 import com.mikepenz.markdown.m3.Markdown
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.launch
 import retrofit2.HttpException
 import java.io.IOException
 
@@ -42,162 +45,164 @@ data class ChatMessage(
     val isLoading: Boolean = false
 )
 
-class ChatViewModel(private val settingsManager: SettingsManager) : ViewModel() {
-    private val _messages = mutableStateListOf<ChatMessage>()
-    val messages: List<ChatMessage> get() = _messages
-
-    private val apiService = GeminiApiService.create()
-    private val gson = Gson()
-
-    init {
-        loadHistory()
-    }
-
-    private fun loadHistory() {
-        viewModelScope.launch {
-            settingsManager.getHistory().first()?.let { historyJson ->
-                val type = object : TypeToken<List<ChatMessage>>() {}.type
-                val history: List<ChatMessage> = gson.fromJson(historyJson, type)
-                _messages.addAll(history)
+class ChatViewModel(
+    private val conversationId: Long,
+    private val chatDao: ChatDao,
+    private val settingsManager: SettingsManager
+) : ViewModel() {
+    val messages: StateFlow<List<ChatMessage>> = chatDao.getMessagesForConversation(conversationId)
+        .map { entities ->
+            entities.map { entity ->
+                ChatMessage(
+                    text = entity.text,
+                    isUser = entity.isUser,
+                    thought = entity.thought
+                )
             }
         }
-    }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
-    private fun saveHistory() {
-        viewModelScope.launch {
-            val historyToSave = _messages.takeLast(10) // 5 conversations = 10 messages (user + assistant)
-            val historyJson = gson.toJson(historyToSave)
-            settingsManager.saveHistory(historyJson)
-        }
-    }
+    private val _loadingMessage = mutableStateOf<ChatMessage?>(null)
+    val loadingMessage: ChatMessage? get() = _loadingMessage.value
 
-    fun sendMessage(context: android.content.Context, userText: String) {
+    private val apiService = GeminiApiService.create()
+
+    fun sendMessage(userText: String) {
         if (userText.isBlank()) return
 
-        val userMessage = ChatMessage(userText, isUser = true)
-        _messages.add(userMessage)
-        
-        // Add a loading message
-        val loadingMessage = ChatMessage("", isUser = false, isLoading = true)
-        _messages.add(loadingMessage)
-        val loadingIndex = _messages.indexOf(loadingMessage)
-
         viewModelScope.launch {
+            // Save user message to DB
+            chatDao.insertMessage(MessageEntity(conversationId = conversationId, text = userText, isUser = true))
+            
+            // Update conversation timestamp and title if it was "New Chat"
+            val currentMessages = messages.value
+            if (currentMessages.size <= 1) { // 1 because we just inserted user message
+                val title = if (userText.length > 30) userText.take(27) + "..." else userText
+                chatDao.updateConversation(Conversation(id = conversationId, title = title, lastModified = System.currentTimeMillis()))
+            } else {
+                val conv = chatDao.getAllConversationsSync().find { it.id == conversationId }
+                conv?.let {
+                    chatDao.updateConversation(it.copy(lastModified = System.currentTimeMillis()))
+                }
+            }
+
+            // Show loading
+            _loadingMessage.value = ChatMessage("", isUser = false, isLoading = true)
+
             try {
                 val apiKey = settingsManager.geminiApiKey.first()
                 if (apiKey.isBlank()) {
-                    _messages[loadingIndex] = ChatMessage("Error: API Key is not set. Please go to settings.", isUser = false)
+                    _loadingMessage.value = ChatMessage("Error: API Key is not set.", isUser = false)
                     return@launch
                 }
 
-                val rawModelName = settingsManager.geminiModel.first()
-                val modelName = if (rawModelName.startsWith("models/")) {
-                    rawModelName.substringAfter("models/")
-                } else {
-                    rawModelName
+                val modelName = settingsManager.geminiModel.first().let {
+                    if (it.startsWith("models/")) it.substringAfter("models/") else it
                 }
                 val isGroundingEnabled = settingsManager.googleGroundingEnabled.first()
+                val tools = if (isGroundingEnabled) listOf(Tool(googleSearch = GoogleSearch())) else null
 
-                val tools = if (isGroundingEnabled) {
-                    listOf(Tool(googleSearch = GoogleSearch()))
-                } else {
-                    null
-                }
-
-                // Create history for the request
-                val historyContext = _messages.filter { !it.isLoading }.takeLast(11).dropLast(1) // Previous 5 conversations (10 messages) + current user message is already added
-                
-                val contents = historyContext.map { msg ->
+                // History from DB
+                val historyEntities = chatDao.getMessagesForConversationSync(conversationId)
+                val contents = historyEntities.map { msg ->
                     Content(role = if (msg.isUser) "user" else "model", parts = listOf(Part(text = msg.text)))
-                } + Content(role = "user", parts = listOf(Part(text = userText)))
-
-                val request = GenerateContentRequest(
-                    contents = contents,
-                    tools = tools
-                )
-
-                val response = apiService.generateContent(
-                    model = modelName,
-                    apiKey = apiKey,
-                    request = request
-                )
-
-                val assistantMessage = ChatMessage(
-                    text = response.text ?: "No response",
-                    isUser = false,
-                    thought = response.thought,
-                    groundingMetadata = response.groundingMetadata
-                )
-                _messages[loadingIndex] = assistantMessage
-                saveHistory()
-            } catch (e: IOException) {
-                android.util.Log.e("ChatViewModel", "Network Error: ${e.message}", e)
-                _messages[loadingIndex] = ChatMessage("Network Error: ${e.message ?: "Please check your internet connection."}", isUser = false)
-            } catch (e: HttpException) {
-                val errorBody = e.response()?.errorBody()?.string()
-                android.util.Log.e("ChatViewModel", "HTTP Error ${e.code()}: $errorBody", e)
-                val errorMessage = when (e.code()) {
-                    401 -> "Error: Invalid API Key."
-                    429 -> "Error: Too many requests. Please try again later."
-                    else -> "API Error (${e.code()}): $errorBody"
                 }
-                _messages[loadingIndex] = ChatMessage(errorMessage, isUser = false)
+
+                val request = GenerateContentRequest(contents = contents, tools = tools)
+                val response = apiService.generateContent(model = modelName, apiKey = apiKey, request = request)
+
+                val responseText = response.text ?: "No response"
+                val responseThought = response.thought
+
+                // Save assistant message to DB
+                chatDao.insertMessage(
+                    MessageEntity(
+                        conversationId = conversationId,
+                        text = responseText,
+                        isUser = false,
+                        thought = responseThought
+                    )
+                )
+                _loadingMessage.value = null
             } catch (e: Exception) {
-                android.util.Log.e("ChatViewModel", "Unexpected Error", e)
-                _messages[loadingIndex] = ChatMessage("Unexpected Error: ${e.message}", isUser = false)
+                _loadingMessage.value = ChatMessage("Error: ${e.message}", isUser = false)
             }
         }
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ChatScreen(
-    modifier: Modifier = Modifier,
-    onNavigateToSettings: () -> Unit,
-    settingsManager: SettingsManager = SettingsManager(LocalContext.current)
+    conversationId: Long,
+    onNavigateBack: () -> Unit,
+    modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
-    val viewModel: ChatViewModel = viewModel(factory = object : ViewModelProvider.Factory {
+    val database = ChatDatabase.getDatabase(context)
+    val settingsManager = SettingsManager(context)
+    val viewModel: ChatViewModel = viewModel(key = conversationId.toString(), factory = object : ViewModelProvider.Factory {
         override fun <T : ViewModel> create(modelClass: Class<T>): T {
-            return ChatViewModel(settingsManager) as T
+            return ChatViewModel(conversationId, database.chatDao(), settingsManager) as T
         }
     })
+    
+    val messages by viewModel.messages.collectAsState()
+    val loadingMessage = viewModel.loadingMessage
     var inputText by remember { mutableStateOf("") }
+    val listState = rememberLazyListState()
 
-    Column(modifier = modifier.fillMaxSize().padding(16.dp)) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.End
-        ) {
-            Button(onClick = onNavigateToSettings) {
-                Text("Settings")
-            }
+    LaunchedEffect(messages.size, loadingMessage) {
+        if (messages.isNotEmpty() || loadingMessage != null) {
+            listState.animateScrollToItem((messages.size + (if (loadingMessage != null) 1 else 0)))
         }
-        LazyColumn(
-            modifier = Modifier.weight(1f),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            items(viewModel.messages) { message ->
-                MessageBubble(message)
-            }
-        }
-        
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            TextField(
-                value = inputText,
-                onValueChange = { inputText = it },
-                modifier = Modifier.weight(1f),
-                placeholder = { Text("Type a message...") }
+    }
+
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text("Chat") },
+                navigationIcon = {
+                    IconButton(onClick = onNavigateBack) {
+                        Icon(Icons.Default.ArrowBack, contentDescription = "Back")
+                    }
+                }
             )
-            Spacer(modifier = Modifier.width(8.dp))
-            Button(onClick = {
-                viewModel.sendMessage(context, inputText)
-                inputText = ""
-            }) {
-                Text("Send")
+        }
+    ) { padding ->
+        Column(modifier = modifier.fillMaxSize().padding(padding).padding(16.dp)) {
+            LazyColumn(
+                state = listState,
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                items(messages) { message ->
+                    MessageBubble(message)
+                }
+                loadingMessage?.let {
+                    item { MessageBubble(it) }
+                }
+            }
+            
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                TextField(
+                    value = inputText,
+                    onValueChange = { inputText = it },
+                    modifier = Modifier.weight(1f),
+                    placeholder = { Text("Type a message...") }
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Button(onClick = {
+                    if (inputText.isNotBlank()) {
+                        viewModel.sendMessage(inputText)
+                        inputText = ""
+                    }
+                }) {
+                    Text("Send")
+                }
             }
         }
     }
@@ -212,7 +217,7 @@ fun MessageBubble(message: ChatMessage) {
         Surface(
             shape = MaterialTheme.shapes.medium,
             color = containerColor,
-            modifier = Modifier.padding(vertical = 4.dp)
+            modifier = Modifier.padding(vertical = 4.dp).widthIn(max = 340.dp)
         ) {
             Column(modifier = Modifier.padding(12.dp)) {
                 if (message.isLoading) {
@@ -227,9 +232,11 @@ fun MessageBubble(message: ChatMessage) {
                         Spacer(modifier = Modifier.height(8.dp))
                     }
                     
-                    Markdown(
-                        content = message.text
-                    )
+                    if (message.isUser) {
+                        Text(text = message.text, style = MaterialTheme.typography.bodyLarge)
+                    } else {
+                        Markdown(content = message.text)
+                    }
 
                     if (message.groundingMetadata != null) {
                         Spacer(modifier = Modifier.height(8.dp))

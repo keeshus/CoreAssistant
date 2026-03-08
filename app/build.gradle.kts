@@ -2,6 +2,7 @@ plugins {
     id("com.android.application")
     id("kotlin-android")
     id("org.jetbrains.kotlin.plugin.compose")
+    id("com.google.devtools.ksp")
 }
 
 android {
@@ -45,6 +46,7 @@ android {
 }
 
 dependencies {
+    implementation(platform("org.jetbrains.kotlin:kotlin-bom:2.1.0"))
     implementation("androidx.core:core-ktx:1.17.0")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.10.0")
     implementation("androidx.activity:activity-compose:1.12.4")
@@ -70,10 +72,13 @@ dependencies {
     implementation("androidx.navigation:navigation-compose:2.9.7")
 
     // Markdown
-    implementation("com.mikepenz:multiplatform-markdown-renderer-m3:0.31.0")
+    implementation("com.mikepenz:multiplatform-markdown-renderer-m3:0.39.2")
 
     // Room DB
     implementation("androidx.room:room-runtime:2.8.4")
-    // ksp("androidx.room:room-compiler:2.6.1") // KSP needed later if we use Room fully
+    ksp("androidx.room:room-compiler:2.8.4")
     implementation("androidx.room:room-ktx:2.8.4")
+
+    // Security (EncryptedSharedPreferences)
+    implementation("androidx.security:security-crypto:1.1.0")
 }

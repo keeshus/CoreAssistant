@@ -31,10 +31,18 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun AppNavigation() {
     val navController = rememberNavController()
-    NavHost(navController = navController, startDestination = "chat") {
-        composable("chat") {
-            ChatScreen(
+    NavHost(navController = navController, startDestination = "conversations") {
+        composable("conversations") {
+            ConversationListScreen(
+                onConversationClick = { id -> navController.navigate("chat/$id") },
                 onNavigateToSettings = { navController.navigate("settings") }
+            )
+        }
+        composable("chat/{conversationId}") { backStackEntry ->
+            val id = backStackEntry.arguments?.getString("conversationId")?.toLongOrNull() ?: -1L
+            ChatScreen(
+                conversationId = id,
+                onNavigateBack = { navController.popBackStack() }
             )
         }
         composable("settings") {
