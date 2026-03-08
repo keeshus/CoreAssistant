@@ -15,10 +15,8 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import androidx.compose.ui.platform.LocalContext
-import com.google.firebase.Firebase
-import com.google.firebase.ai.ai
-import com.google.firebase.ai.type.GenerativeBackend
-import com.google.firebase.ai.type.Tool
+import retrofit2.HttpException
+import java.io.IOException
 
 data class ChatMessage(val text: String, val isUser: Boolean)
 
@@ -26,31 +24,57 @@ class ChatViewModel(private val settingsManager: SettingsManager) : ViewModel() 
     private val _messages = mutableStateListOf<ChatMessage>()
     val messages: List<ChatMessage> get() = _messages
 
-    fun sendMessage(userText: String) {
+    private val apiService = GeminiApiService.create()
+
+    fun sendMessage(context: android.content.Context, userText: String) {
         if (userText.isBlank()) return
 
         _messages.add(ChatMessage(userText, isUser = true))
         
         viewModelScope.launch {
             try {
+                val apiKey = settingsManager.geminiApiKey.first()
+                if (apiKey.isBlank()) {
+                    _messages.add(ChatMessage("Error: API Key is not set. Please go to settings.", isUser = false))
+                    return@launch
+                }
+
                 val modelName = settingsManager.geminiModel.first()
                 val isGroundingEnabled = settingsManager.googleGroundingEnabled.first()
 
                 val tools = if (isGroundingEnabled) {
-                    listOf(Tool.googleSearch())
+                    listOf(Tool(googleSearchRetrieval = GoogleSearchRetrieval()))
                 } else {
                     null
                 }
 
-                val generativeModel = Firebase.ai(backend = GenerativeBackend.googleAI()).generativeModel(
-                    modelName = modelName,
+                val request = GenerateContentRequest(
+                    contents = listOf(Content(parts = listOf(Part(text = userText)))),
                     tools = tools
                 )
 
-                val response = generativeModel.generateContent(userText)
+                val response = apiService.generateContent(
+                    model = modelName,
+                    apiKey = apiKey,
+                    request = request
+                )
+
                 _messages.add(ChatMessage(response.text ?: "No response", isUser = false))
+            } catch (e: IOException) {
+                android.util.Log.e("ChatViewModel", "Network Error", e)
+                _messages.add(ChatMessage("Network Error: Please check your internet connection.", isUser = false))
+            } catch (e: HttpException) {
+                val errorBody = e.response()?.errorBody()?.string()
+                android.util.Log.e("ChatViewModel", "HTTP Error ${e.code()}: $errorBody", e)
+                val errorMessage = when (e.code()) {
+                    401 -> "Error: Invalid API Key."
+                    429 -> "Error: Too many requests. Please try again later."
+                    else -> "API Error (${e.code()}): $errorBody"
+                }
+                _messages.add(ChatMessage(errorMessage, isUser = false))
             } catch (e: Exception) {
-                _messages.add(ChatMessage("Error: ${e.message}", isUser = false))
+                android.util.Log.e("ChatViewModel", "Unexpected Error", e)
+                _messages.add(ChatMessage("Unexpected Error: ${e.message}", isUser = false))
             }
         }
     }
@@ -62,6 +86,7 @@ fun ChatScreen(
     onNavigateToSettings: () -> Unit,
     settingsManager: SettingsManager = SettingsManager(LocalContext.current)
 ) {
+    val context = LocalContext.current
     val viewModel: ChatViewModel = viewModel(factory = object : ViewModelProvider.Factory {
         override fun <T : ViewModel> create(modelClass: Class<T>): T {
             return ChatViewModel(settingsManager) as T
@@ -73,7 +98,7 @@ fun ChatScreen(
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.End
-        ) {
+		) {
             Button(onClick = onNavigateToSettings) {
                 Text("Settings")
             }
@@ -99,7 +124,7 @@ fun ChatScreen(
             )
             Spacer(modifier = Modifier.width(8.dp))
             Button(onClick = {
-                viewModel.sendMessage(inputText)
+                viewModel.sendMessage(context, inputText)
                 inputText = ""
             }) {
                 Text("Send")
