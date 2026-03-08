@@ -111,7 +111,19 @@ class ChatViewModel(
                     Content(role = if (msg.isUser) "user" else "model", parts = listOf(Part(text = msg.text)))
                 }
 
-                val request = GenerateContentRequest(contents = contents, tools = tools)
+                val thinkingLevel = settingsManager.geminiThinkingLevel.first()
+                val configuration = if (thinkingLevel != "OFF") {
+                    GenerationConfig(
+                        thinkingConfig = ThinkingConfig(
+                            includeThoughts = true,
+                            thinkingLevel = thinkingLevel
+                        )
+                    )
+                } else {
+                    null
+                }
+                
+                val request = GenerateContentRequest(contents = contents, tools = tools, generationConfig = configuration)
                 val response = apiService.generateContent(model = modelName, apiKey = apiKey, request = request)
 
                 val responseText = response.text ?: "No response"

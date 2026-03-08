@@ -34,6 +34,7 @@ class SettingsManager(private val context: Context) {
         val GEMINI_API_KEY = stringPreferencesKey("gemini_api_key")
         val GEMINI_MODEL = stringPreferencesKey("gemini_model")
         val GOOGLE_GROUNDING_ENABLED = booleanPreferencesKey("google_grounding_enabled")
+        val GEMINI_THINKING_LEVEL = stringPreferencesKey("gemini_thinking_level")
         val CHAT_HISTORY = stringPreferencesKey("chat_history")
         val CONVERSATIONS_LIMIT = stringPreferencesKey("conversations_limit")
     }
@@ -48,6 +49,10 @@ class SettingsManager(private val context: Context) {
 
     val conversationsLimit: Flow<Int> = context.dataStore.data.map { preferences ->
         preferences[CONVERSATIONS_LIMIT]?.toIntOrNull() ?: 5
+    }
+
+    val geminiThinkingLevel: Flow<String> = context.dataStore.data.map { preferences ->
+        preferences[GEMINI_THINKING_LEVEL] ?: "OFF"
     }
 
     fun getHistory(): Flow<String?> = context.dataStore.data.map { preferences ->
@@ -68,6 +73,12 @@ class SettingsManager(private val context: Context) {
     suspend fun saveGoogleGroundingEnabled(enabled: Boolean) {
         context.dataStore.edit { preferences ->
             preferences[GOOGLE_GROUNDING_ENABLED] = enabled
+        }
+    }
+
+    suspend fun saveGeminiThinkingLevel(level: String) {
+        context.dataStore.edit { preferences ->
+            preferences[GEMINI_THINKING_LEVEL] = level
         }
     }
 

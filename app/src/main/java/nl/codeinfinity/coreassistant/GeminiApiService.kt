@@ -46,7 +46,18 @@ interface GeminiApiService {
 // Request Models
 data class GenerateContentRequest(
     val contents: List<Content>,
-    val tools: List<Tool>? = null
+    val tools: List<Tool>? = null,
+    val generationConfig: GenerationConfig? = null
+)
+
+data class GenerationConfig(
+    val includeThoughts: Boolean? = null,
+    val thinkingConfig: ThinkingConfig? = null
+)
+
+data class ThinkingConfig(
+    val includeThoughts: Boolean? = null,
+    val thinkingLevel: String? = null
 )
 
 data class Content(

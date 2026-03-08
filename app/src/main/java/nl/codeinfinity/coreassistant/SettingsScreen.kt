@@ -40,6 +40,9 @@ class SettingsViewModel(private val settingsManager: SettingsManager) : ViewMode
     val conversationsLimit: StateFlow<Int> = settingsManager.conversationsLimit
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 5)
 
+    val thinkingLevel: StateFlow<String> = settingsManager.geminiThinkingLevel
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "OFF")
+
     private val _availableModels = mutableStateListOf<GeminiModel>()
     val availableModels: List<GeminiModel> = _availableModels
 
@@ -90,6 +93,12 @@ class SettingsViewModel(private val settingsManager: SettingsManager) : ViewMode
             settingsManager.saveConversationsLimit(limit)
         }
     }
+
+    fun saveThinkingLevel(level: String) {
+        viewModelScope.launch {
+            settingsManager.saveGeminiThinkingLevel(level)
+        }
+    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -108,9 +117,11 @@ fun SettingsScreen(
     val selectedModel by viewModel.selectedModel.collectAsState()
     val groundingEnabled by viewModel.groundingEnabled.collectAsState()
     val conversationsLimit by viewModel.conversationsLimit.collectAsState()
+    val thinkingLevel by viewModel.thinkingLevel.collectAsState()
     val availableModels = viewModel.availableModels
 
     var expanded by remember { mutableStateOf(false) }
+    var thinkingExpanded by remember { mutableStateOf(false) }
     var apiKeyVisible by remember { mutableStateOf(false) }
 
     Scaffold(
@@ -180,6 +191,36 @@ fun SettingsScreen(
                             onClick = {
                                 viewModel.saveModel(model.name)
                                 expanded = false
+                            }
+                        )
+                    }
+                }
+            }
+
+            Box(modifier = Modifier.fillMaxWidth()) {
+                OutlinedTextField(
+                    value = thinkingLevel,
+                    onValueChange = { },
+                    readOnly = true,
+                    label = { Text("Thinking Level") },
+                    modifier = Modifier.fillMaxWidth(),
+                    trailingIcon = {
+                        IconButton(onClick = { thinkingExpanded = true }) {
+                            Icon(Icons.Default.ArrowDropDown, contentDescription = null)
+                        }
+                    }
+                )
+                DropdownMenu(
+                    expanded = thinkingExpanded,
+                    onDismissRequest = { thinkingExpanded = false },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    listOf("OFF", "LOW", "MEDIUM", "HIGH").forEach { level ->
+                        DropdownMenuItem(
+                            text = { Text(level) },
+                            onClick = {
+                                viewModel.saveThinkingLevel(level)
+                                thinkingExpanded = false
                             }
                         )
                     }
