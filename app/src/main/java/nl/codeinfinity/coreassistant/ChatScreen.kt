@@ -12,12 +12,13 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
-import com.google.ai.client.generativeai.GenerativeModel
-import com.google.ai.client.generativeai.type.Tool
-import com.google.ai.client.generativeai.type.content
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import androidx.compose.ui.platform.LocalContext
+import com.google.firebase.Firebase
+import com.google.firebase.ai.ai
+import com.google.firebase.ai.type.GenerativeBackend
+import com.google.firebase.ai.type.Tool
 
 data class ChatMessage(val text: String, val isUser: Boolean)
 
@@ -32,27 +33,19 @@ class ChatViewModel(private val settingsManager: SettingsManager) : ViewModel() 
         
         viewModelScope.launch {
             try {
-                val apiKey = settingsManager.geminiApiKey.first()
                 val modelName = settingsManager.geminiModel.first()
                 val isGroundingEnabled = settingsManager.googleGroundingEnabled.first()
 
-                if (apiKey.isBlank()) {
-                    _messages.add(ChatMessage("Error: API Key not set in settings", isUser = false))
-                    return@launch
+                val tools = if (isGroundingEnabled) {
+                    listOf(Tool.googleSearch())
+                } else {
+                    null
                 }
 
-                val generativeModel = if (isGroundingEnabled) {
-                    GenerativeModel(
-                        modelName = modelName,
-                        apiKey = apiKey,
-                        tools = listOf(Tool(emptyList()))
-                    )
-                } else {
-                    GenerativeModel(
-                        modelName = modelName,
-                        apiKey = apiKey
-                    )
-                }
+                val generativeModel = Firebase.ai(backend = GenerativeBackend.googleAI()).generativeModel(
+                    modelName = modelName,
+                    tools = tools
+                )
 
                 val response = generativeModel.generateContent(userText)
                 _messages.add(ChatMessage(response.text ?: "No response", isUser = false))
@@ -102,7 +95,7 @@ fun ChatScreen(
                 value = inputText,
                 onValueChange = { inputText = it },
                 modifier = Modifier.weight(1f),
-                placeholder = { Text("Ask Gemini...") }
+                placeholder = { Text("Type a message...") }
             )
             Spacer(modifier = Modifier.width(8.dp))
             Button(onClick = {
@@ -117,17 +110,19 @@ fun ChatScreen(
 
 @Composable
 fun MessageBubble(message: ChatMessage) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = if (message.isUser) Arrangement.End else Arrangement.Start
-    ) {
+    val alignment = if (message.isUser) Alignment.End else Alignment.Start
+    val containerColor = if (message.isUser) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.secondaryContainer
+
+    Column(modifier = Modifier.fillMaxWidth(), horizontalAlignment = alignment) {
         Surface(
-            color = if (message.isUser) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.secondaryContainer,
-            shape = MaterialTheme.shapes.medium
+            shape = MaterialTheme.shapes.medium,
+            color = containerColor,
+            modifier = Modifier.padding(vertical = 4.dp)
         ) {
             Text(
                 text = message.text,
-                modifier = Modifier.padding(12.dp)
+                modifier = Modifier.padding(12.dp),
+                style = MaterialTheme.typography.bodyLarge
             )
         }
     }
