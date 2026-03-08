@@ -28,6 +28,9 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import androidx.compose.ui.platform.LocalContext
+import com.google.gson.Gson
+import com.google.gson.reflect.TypeToken
+import com.mikepenz.markdown.m3.Markdown
 import retrofit2.HttpException
 import java.io.IOException
 
@@ -44,11 +47,35 @@ class ChatViewModel(private val settingsManager: SettingsManager) : ViewModel() 
     val messages: List<ChatMessage> get() = _messages
 
     private val apiService = GeminiApiService.create()
+    private val gson = Gson()
+
+    init {
+        loadHistory()
+    }
+
+    private fun loadHistory() {
+        viewModelScope.launch {
+            settingsManager.getHistory().first()?.let { historyJson ->
+                val type = object : TypeToken<List<ChatMessage>>() {}.type
+                val history: List<ChatMessage> = gson.fromJson(historyJson, type)
+                _messages.addAll(history)
+            }
+        }
+    }
+
+    private fun saveHistory() {
+        viewModelScope.launch {
+            val historyToSave = _messages.takeLast(10) // 5 conversations = 10 messages (user + assistant)
+            val historyJson = gson.toJson(historyToSave)
+            settingsManager.saveHistory(historyJson)
+        }
+    }
 
     fun sendMessage(context: android.content.Context, userText: String) {
         if (userText.isBlank()) return
 
-        _messages.add(ChatMessage(userText, isUser = true))
+        val userMessage = ChatMessage(userText, isUser = true)
+        _messages.add(userMessage)
         
         // Add a loading message
         val loadingMessage = ChatMessage("", isUser = false, isLoading = true)
@@ -77,8 +104,15 @@ class ChatViewModel(private val settingsManager: SettingsManager) : ViewModel() 
                     null
                 }
 
+                // Create history for the request
+                val historyContext = _messages.filter { !it.isLoading }.takeLast(11).dropLast(1) // Previous 5 conversations (10 messages) + current user message is already added
+                
+                val contents = historyContext.map { msg ->
+                    Content(role = if (msg.isUser) "user" else "model", parts = listOf(Part(text = msg.text)))
+                } + Content(role = "user", parts = listOf(Part(text = userText)))
+
                 val request = GenerateContentRequest(
-                    contents = listOf(Content(parts = listOf(Part(text = userText)))),
+                    contents = contents,
                     tools = tools
                 )
 
@@ -88,12 +122,14 @@ class ChatViewModel(private val settingsManager: SettingsManager) : ViewModel() 
                     request = request
                 )
 
-                _messages[loadingIndex] = ChatMessage(
+                val assistantMessage = ChatMessage(
                     text = response.text ?: "No response",
                     isUser = false,
                     thought = response.thought,
                     groundingMetadata = response.groundingMetadata
                 )
+                _messages[loadingIndex] = assistantMessage
+                saveHistory()
             } catch (e: IOException) {
                 android.util.Log.e("ChatViewModel", "Network Error: ${e.message}", e)
                 _messages[loadingIndex] = ChatMessage("Network Error: ${e.message ?: "Please check your internet connection."}", isUser = false)
@@ -191,9 +227,8 @@ fun MessageBubble(message: ChatMessage) {
                         Spacer(modifier = Modifier.height(8.dp))
                     }
                     
-                    Text(
-                        text = message.text,
-                        style = MaterialTheme.typography.bodyLarge
+                    Markdown(
+                        content = message.text
                     )
 
                     if (message.groundingMetadata != null) {

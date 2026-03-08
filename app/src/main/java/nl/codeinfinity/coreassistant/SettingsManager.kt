@@ -18,6 +18,7 @@ class SettingsManager(private val context: Context) {
         val GEMINI_API_KEY = stringPreferencesKey("gemini_api_key")
         val GEMINI_MODEL = stringPreferencesKey("gemini_model")
         val GOOGLE_GROUNDING_ENABLED = booleanPreferencesKey("google_grounding_enabled")
+        val CHAT_HISTORY = stringPreferencesKey("chat_history")
     }
 
     val geminiApiKey: Flow<String> = context.dataStore.data.map { preferences ->
@@ -30,6 +31,10 @@ class SettingsManager(private val context: Context) {
 
     val googleGroundingEnabled: Flow<Boolean> = context.dataStore.data.map { preferences ->
         preferences[GOOGLE_GROUNDING_ENABLED] ?: false
+    }
+
+    fun getHistory(): Flow<String?> = context.dataStore.data.map { preferences ->
+        preferences[CHAT_HISTORY]
     }
 
     suspend fun saveGeminiApiKey(apiKey: String) {
@@ -47,6 +52,12 @@ class SettingsManager(private val context: Context) {
     suspend fun saveGoogleGroundingEnabled(enabled: Boolean) {
         context.dataStore.edit { preferences ->
             preferences[GOOGLE_GROUNDING_ENABLED] = enabled
+        }
+    }
+
+    suspend fun saveHistory(historyJson: String) {
+        context.dataStore.edit { preferences ->
+            preferences[CHAT_HISTORY] = historyJson
         }
     }
 }
