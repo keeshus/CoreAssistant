@@ -78,22 +78,42 @@ class GoogleSearch
 
 // Response Models
 data class GenerateContentResponse(
-    val candidates: List<Candidate>
+    val candidates: List<Candidate>? = null,
+    val promptFeedback: PromptFeedback? = null,
+    val error: GeminiError? = null
 ) {
     val text: String?
-        get() = candidates.firstOrNull()?.content?.parts?.find { it.thought != true }?.text
+        get() = candidates?.firstOrNull()?.content?.parts?.find { it.thought != true }?.text
         
     val thought: String?
-        get() = candidates.firstOrNull()?.content?.parts?.find { it.thought == true }?.text
+        get() = candidates?.firstOrNull()?.content?.parts?.find { it.thought == true }?.text
         
     val groundingMetadata: GroundingMetadata?
-        get() = candidates.firstOrNull()?.groundingMetadata
+        get() = candidates?.firstOrNull()?.groundingMetadata
 }
 
+data class GeminiError(
+    val code: Int? = null,
+    val message: String? = null,
+    val status: String? = null
+)
+
+data class PromptFeedback(
+    val blockReason: String? = null,
+    val safetyRatings: List<SafetyRating>? = null
+)
+
+data class SafetyRating(
+    val category: String,
+    val probability: String,
+    val blocked: Boolean? = null
+)
+
 data class Candidate(
-    val content: Content,
+    val content: Content? = null,
     val finishReason: String? = null,
-    val groundingMetadata: GroundingMetadata? = null
+    val groundingMetadata: GroundingMetadata? = null,
+    val safetyRatings: List<SafetyRating>? = null
 )
 
 data class GroundingMetadata(

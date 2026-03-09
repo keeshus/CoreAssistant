@@ -70,15 +70,8 @@ class SettingsManager(private val context: Context) {
         }
     }
 
-    private val _geminiApiKey = MutableStateFlow("")
-    val geminiApiKey: Flow<String> = _geminiApiKey.asStateFlow()
-
-    init {
-        // Initialize the flow with the current value
-        CoroutineScope(Dispatchers.IO).launch {
-            val encrypted = context.dataStore.data.map { it[GEMINI_API_KEY_SECURE] }.first()
-            _geminiApiKey.value = encrypted?.let { decrypt(it) } ?: ""
-        }
+    val geminiApiKey: Flow<String> = context.dataStore.data.map { preferences ->
+        preferences[GEMINI_API_KEY_SECURE]?.let { decrypt(it) } ?: ""
     }
 
     companion object {
@@ -121,7 +114,6 @@ preferences ->
         context.dataStore.edit { preferences ->
             preferences[GEMINI_API_KEY_SECURE] = encrypted
         }
-        _geminiApiKey.value = apiKey
     }
 
     suspend fun saveGeminiModel(model: String) {

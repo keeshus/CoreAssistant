@@ -30,12 +30,14 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.mikepenz.markdown.m3.Markdown
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import retrofit2.HttpException
 import java.io.IOException
 
@@ -75,17 +77,25 @@ class ChatViewModel(
 
         viewModelScope.launch {
             // Save user message to DB
-            chatDao.insertMessage(MessageEntity(conversationId = conversationId, text = userText, isUser = true))
+            withContext(Dispatchers.IO) {
+                chatDao.insertMessage(MessageEntity(conversationId = conversationId, text = userText, isUser = true))
+            }
             
             // Update conversation timestamp and title if it was "New Chat"
             val currentMessages = messages.value
             if (currentMessages.size <= 1) { // 1 because we just inserted user message
                 val title = if (userText.length > 30) userText.take(27) + "..." else userText
-                chatDao.updateConversation(Conversation(id = conversationId, title = title, lastModified = System.currentTimeMillis()))
+                withContext(Dispatchers.IO) {
+                    chatDao.updateConversation(Conversation(id = conversationId, title = title, lastModified = System.currentTimeMillis()))
+                }
             } else {
-                val conv = chatDao.getAllConversationsSync().find { it.id == conversationId }
+                val conv = withContext(Dispatchers.IO) {
+                    chatDao.getAllConversationsSync().find { it.id == conversationId }
+                }
                 conv?.let {
-                    chatDao.updateConversation(it.copy(lastModified = System.currentTimeMillis()))
+                    withContext(Dispatchers.IO) {
+                        chatDao.updateConversation(it.copy(lastModified = System.currentTimeMillis()))
+                    }
                 }
             }
 
@@ -106,7 +116,9 @@ class ChatViewModel(
                 val tools = if (isGroundingEnabled) listOf(Tool(googleSearch = GoogleSearch())) else null
 
                 // History from DB
-                val historyEntities = chatDao.getMessagesForConversationSync(conversationId)
+                val historyEntities = withContext(Dispatchers.IO) {
+                    chatDao.getMessagesForConversationSync(conversationId)
+                }
                 val contents = historyEntities.map { msg ->
                     Content(role = if (msg.isUser) "user" else "model", parts = listOf(Part(text = msg.text)))
                 }
@@ -126,29 +138,78 @@ class ChatViewModel(
                 val request = GenerateContentRequest(contents = contents, tools = tools, generationConfig = configuration)
                 val response = apiService.generateContent(model = modelName, apiKey = apiKey, request = request)
 
-                val responseText = response.text ?: "No response"
+                val responseText = response.text
                 val responseThought = response.thought
                 val groundingMetadata = response.groundingMetadata
+                
+                if (responseText == null) {
+                    val blockReason = response.candidates?.firstOrNull()?.finishReason 
+                        ?: response.promptFeedback?.blockReason
+                    
+                    val errorMessage = when (blockReason) {
+                        "SAFETY" -> "Error: Response blocked by safety filters."
+                        "RECITATION" -> "Error: Response blocked due to content recitation."
+                        "OTHER" -> "Error: Response blocked for other reasons."
+                        else -> "Error: Received an empty response from the API."
+                    }
+                    _loadingMessage.value = ChatMessage(errorMessage, isUser = false)
+                    return@launch
+                }
                 
                 android.util.Log.d("ChatViewModel", "Response text: $responseText")
                 android.util.Log.d("ChatViewModel", "Response thought: ${if (responseThought != null) "Present" else "Null"}")
                 android.util.Log.d("ChatViewModel", "Grounding metadata: ${if (groundingMetadata != null) "Present" else "Null"}")
 
                 // Save assistant message to DB
-                chatDao.insertMessage(
-                    MessageEntity(
-                        conversationId = conversationId,
-                        text = responseText,
-                        isUser = false,
-                        thought = responseThought,
-                        groundingMetadata = groundingMetadata
+                withContext(Dispatchers.IO) {
+                    chatDao.insertMessage(
+                        MessageEntity(
+                            conversationId = conversationId,
+                            text = responseText,
+                            isUser = false,
+                            thought = responseThought,
+                            groundingMetadata = groundingMetadata
+                        )
                     )
-                )
+                }
                 _loadingMessage.value = null
+            } catch (e: retrofit2.HttpException) {
+                val errorBody = e.response()?.errorBody()?.string()
+                val descriptiveMessage = try {
+                    val errorResponse = com.google.gson.Gson().fromJson(errorBody, GenerateContentResponse::class.java)
+                    errorResponse.error?.message ?: e.message()
+                } catch (_: Exception) {
+                    e.message()
+                }
+
+                val userFriendlyMessage = when (e.code()) {
+                    400 -> "Bad Request: $descriptiveMessage"
+                    401, 403 -> "Invalid API Key or Permission Denied."
+                    429 -> "Quota Exceeded: Please try again later."
+                    500, 503 -> "Gemini API is currently unavailable."
+                    else -> "API Error (${e.code()}): $descriptiveMessage"
+                }
+                _loadingMessage.value = ChatMessage(userFriendlyMessage, isUser = false)
+            } catch (e: java.io.IOException) {
+                _loadingMessage.value = ChatMessage("Network Error: Please check your connection.", isUser = false)
             } catch (e: Exception) {
                 _loadingMessage.value = ChatMessage("Error: ${e.message}", isUser = false)
             }
         }
+    }
+}
+
+class ChatViewModelFactory(
+    private val conversationId: Long,
+    private val chatDao: ChatDao,
+    private val settingsManager: SettingsManager
+) : ViewModelProvider.Factory {
+    override fun <T : ViewModel> create(modelClass: Class<T>): T {
+        if (modelClass.isAssignableFrom(ChatViewModel::class.java)) {
+            @Suppress("UNCHECKED_CAST")
+            return ChatViewModel(conversationId, chatDao, settingsManager) as T
+        }
+        throw IllegalArgumentException("Unknown ViewModel class")
     }
 }
 
@@ -159,16 +220,20 @@ fun ChatScreen(
     onNavigateBack: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val context = LocalContext.current
-    val database = ChatDatabase.getDatabase(context)
-    val settingsManager = SettingsManager(context)
-    val viewModel: ChatViewModel = viewModel(key = conversationId.toString(), factory = object : ViewModelProvider.Factory {
-        override fun <T : ViewModel> create(modelClass: Class<T>): T {
-            return ChatViewModel(conversationId, database.chatDao(), settingsManager) as T
+    val context = LocalContext.current.applicationContext
+    val viewModel: ChatViewModel = viewModel(
+        key = conversationId.toString(),
+        factory = remember(conversationId) {
+            ChatViewModelFactory(
+                conversationId = conversationId,
+                chatDao = ChatDatabase.getDatabase(context).chatDao(),
+                settingsManager = SettingsManager(context)
+            )
         }
-    })
+    )
     
     val messages by viewModel.messages.collectAsState()
+    val settingsManager = remember(context) { SettingsManager(context) }
     val userName by settingsManager.userName.collectAsState(initial = "User")
     val loadingMessage = viewModel.loadingMessage
     var inputText by remember { mutableStateOf("") }

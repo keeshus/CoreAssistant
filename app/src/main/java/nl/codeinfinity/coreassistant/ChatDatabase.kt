@@ -96,6 +96,8 @@ abstract class ChatDatabase : RoomDatabase() {
                     ChatDatabase::class.java,
                     "chat_database"
                 )
+                // TODO: Replace with proper migrations before production release
+                // Current version is 2. Fallback to destructive migration is used for simplicity during development.
                 .fallbackToDestructiveMigration()
                 .build()
                 INSTANCE = instance
