@@ -37,6 +37,11 @@ class SettingsManager(private val context: Context) {
         val GEMINI_THINKING_LEVEL = stringPreferencesKey("gemini_thinking_level")
         val CHAT_HISTORY = stringPreferencesKey("chat_history")
         val CONVERSATIONS_LIMIT = stringPreferencesKey("conversations_limit")
+        val USER_NAME = stringPreferencesKey("user_name")
+    }
+
+    val userName: Flow<String> = context.dataStore.data.map { preferences ->
+        preferences[USER_NAME] ?: "User"
     }
 
     val geminiModel: Flow<String> = context.dataStore.data.map {
@@ -86,6 +91,12 @@ preferences ->
     suspend fun saveConversationsLimit(limit: String) {
         context.dataStore.edit { preferences ->
             preferences[CONVERSATIONS_LIMIT] = limit
+        }
+    }
+
+    suspend fun saveUserName(name: String) {
+        context.dataStore.edit { preferences ->
+            preferences[USER_NAME] = name
         }
     }
 

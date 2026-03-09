@@ -25,9 +25,18 @@ class SetupViewModel(private val settingsManager: SettingsManager) : ViewModel()
     val apiKey: StateFlow<String> = settingsManager.geminiApiKey
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "")
 
+    val userName: StateFlow<String> = settingsManager.userName
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "User")
+
     fun saveApiKey(key: String) {
         viewModelScope.launch {
             settingsManager.saveGeminiApiKey(key)
+        }
+    }
+
+    fun saveUserName(name: String) {
+        viewModelScope.launch {
+            settingsManager.saveUserName(name)
         }
     }
 }
@@ -44,6 +53,7 @@ fun SetupScreen(
     })
 
     val apiKey by viewModel.apiKey.collectAsState()
+    val userName by viewModel.userName.collectAsState()
     var apiKeyVisible by remember { mutableStateOf(false) }
 
     Column(
@@ -63,13 +73,23 @@ fun SetupScreen(
         Spacer(modifier = Modifier.height(16.dp))
         
         Text(
-            text = "To get started, please enter your Gemini API Key. You can get one from the Google AI Studio.",
+            text = "To get started, please enter your name and Gemini API Key.",
             style = MaterialTheme.typography.bodyMedium,
             textAlign = TextAlign.Center,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
         
         Spacer(modifier = Modifier.height(32.dp))
+
+        OutlinedTextField(
+            value = userName,
+            onValueChange = { viewModel.saveUserName(it) },
+            label = { Text("Your Name") },
+            modifier = Modifier.fillMaxWidth(),
+            singleLine = true
+        )
+
+        Spacer(modifier = Modifier.height(16.dp))
         
         OutlinedTextField(
             value = apiKey,
@@ -92,12 +112,12 @@ fun SetupScreen(
         
         Button(
             onClick = {
-                if (apiKey.isNotBlank()) {
+                if (apiKey.isNotBlank() && userName.isNotBlank()) {
                     onSetupComplete()
                 }
             },
             modifier = Modifier.fillMaxWidth(),
-            enabled = apiKey.isNotBlank()
+            enabled = apiKey.isNotBlank() && userName.isNotBlank()
         ) {
             Text("Finish Setup")
         }

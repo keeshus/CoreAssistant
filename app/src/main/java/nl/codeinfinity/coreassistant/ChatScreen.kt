@@ -169,6 +169,7 @@ fun ChatScreen(
     })
     
     val messages by viewModel.messages.collectAsState()
+    val userName by settingsManager.userName.collectAsState(initial = "User")
     val loadingMessage = viewModel.loadingMessage
     var inputText by remember { mutableStateOf("") }
     val listState = rememberLazyListState()
@@ -198,10 +199,10 @@ fun ChatScreen(
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 items(messages) { message ->
-                    MessageBubble(message)
+                    MessageBubble(message, userName)
                 }
                 loadingMessage?.let {
-                    item { MessageBubble(it) }
+                    item { MessageBubble(it, userName) }
                 }
             }
             
@@ -230,11 +231,17 @@ fun ChatScreen(
 }
 
 @Composable
-fun MessageBubble(message: ChatMessage) {
+fun MessageBubble(message: ChatMessage, userName: String) {
     val alignment = if (message.isUser) Alignment.End else Alignment.Start
     val containerColor = if (message.isUser) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.secondaryContainer
 
     Column(modifier = Modifier.fillMaxWidth(), horizontalAlignment = alignment) {
+        Text(
+            text = if (message.isUser) userName else "Gemini",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.secondary,
+            modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
+        )
         Surface(
             shape = MaterialTheme.shapes.medium,
             color = containerColor,
