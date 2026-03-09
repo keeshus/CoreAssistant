@@ -7,7 +7,10 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
@@ -21,7 +24,13 @@ class MainActivity : ComponentActivity() {
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background
                 ) {
-                    AppNavigation()
+                    val settingsManager = SettingsManager(LocalContext.current)
+                    val apiKey by settingsManager.geminiApiKey.collectAsState(initial = null)
+
+                    if (apiKey != null) {
+                        val needsSetup = apiKey!!.isBlank()
+                        AppNavigation(needsSetup = needsSetup, settingsManager = settingsManager)
+                    }
                 }
             }
         }
@@ -29,9 +38,22 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-fun AppNavigation() {
+fun AppNavigation(needsSetup: Boolean, settingsManager: SettingsManager) {
     val navController = rememberNavController()
-    NavHost(navController = navController, startDestination = "conversations") {
+    NavHost(
+        navController = navController,
+        startDestination = if (needsSetup) "setup" else "conversations"
+    ) {
+        composable("setup") {
+            SetupScreen(
+                onSetupComplete = {
+                    navController.navigate("conversations") {
+                        popUpTo("setup") { inclusive = true }
+                    }
+                },
+                settingsManager = settingsManager
+            )
+        }
         composable("conversations") {
             ConversationListScreen(
                 onConversationClick = { id -> navController.navigate("chat/$id") },
@@ -47,7 +69,8 @@ fun AppNavigation() {
         }
         composable("settings") {
             SettingsScreen(
-                onBack = { navController.popBackStack() }
+                onBack = { navController.popBackStack() },
+                settingsManager = settingsManager
             )
         }
     }

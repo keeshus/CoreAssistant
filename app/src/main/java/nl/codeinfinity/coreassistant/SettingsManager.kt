@@ -39,7 +39,8 @@ class SettingsManager(private val context: Context) {
         val CONVERSATIONS_LIMIT = stringPreferencesKey("conversations_limit")
     }
 
-    val geminiModel: Flow<String> = context.dataStore.data.map { preferences ->
+    val geminiModel: Flow<String> = context.dataStore.data.map {
+preferences ->
         preferences[GEMINI_MODEL] ?: "gemini-1.5-flash"
     }
 
