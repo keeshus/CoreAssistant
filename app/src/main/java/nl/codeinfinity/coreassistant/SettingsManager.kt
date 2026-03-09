@@ -1,37 +1,88 @@
 package nl.codeinfinity.coreassistant
 
 import android.content.Context
+import android.security.keystore.KeyGenParameterSpec
+import android.security.keystore.KeyProperties
+import android.util.Base64
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
-import androidx.security.crypto.EncryptedSharedPreferences
-import androidx.security.crypto.MasterKeys
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.launch
+import java.security.KeyStore
+import javax.crypto.Cipher
+import javax.crypto.KeyGenerator
+import javax.crypto.SecretKey
+import javax.crypto.spec.GCMParameterSpec
 
 val Context.dataStore: DataStore<Preferences> by preferencesDataStore(name = "settings")
 
 class SettingsManager(private val context: Context) {
+    private val keyAlias = "gemini_api_key_alias"
+    private val androidKeyStore = "AndroidKeyStore"
 
-    private val masterKeyAlias = MasterKeys.getOrCreate(MasterKeys.AES256_GCM_SPEC)
-    private val encryptedPrefs = EncryptedSharedPreferences.create(
-        "secure_settings",
-        masterKeyAlias,
-        context,
-        EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
-        EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
-    )
+    private fun getOrCreateKey(): SecretKey {
+        val keyStore = KeyStore.getInstance(androidKeyStore).apply { load(null) }
+        keyStore.getKey(keyAlias, null)?.let { return it as SecretKey }
 
-    private val _geminiApiKey = MutableStateFlow(encryptedPrefs.getString("gemini_api_key", "") ?: "")
+        val keyGenerator = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, androidKeyStore)
+        val spec = KeyGenParameterSpec.Builder(
+            keyAlias,
+            KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT
+        )
+            .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
+            .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
+            .build()
+        keyGenerator.init(spec)
+        return keyGenerator.generateKey()
+    }
+
+    private fun encrypt(data: String): String {
+        val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+        cipher.init(Cipher.ENCRYPT_MODE, getOrCreateKey())
+        val iv = cipher.iv
+        val encryptedData = cipher.doFinal(data.toByteArray(Charsets.UTF_8))
+        val combined = iv + encryptedData
+        return Base64.encodeToString(combined, Base64.DEFAULT)
+    }
+
+    private fun decrypt(encryptedDataWithIv: String): String? {
+        return try {
+            val combined = Base64.decode(encryptedDataWithIv, Base64.DEFAULT)
+            val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+            val ivSize = 12 // Standard GCM IV size
+            val iv = combined.copyOfRange(0, ivSize)
+            val encryptedData = combined.copyOfRange(ivSize, combined.size)
+            val spec = GCMParameterSpec(128, iv)
+            cipher.init(Cipher.DECRYPT_MODE, getOrCreateKey(), spec)
+            String(cipher.doFinal(encryptedData), Charsets.UTF_8)
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    private val _geminiApiKey = MutableStateFlow("")
     val geminiApiKey: Flow<String> = _geminiApiKey.asStateFlow()
 
+    init {
+        // Initialize the flow with the current value
+        CoroutineScope(Dispatchers.IO).launch {
+            val encrypted = context.dataStore.data.map { it[GEMINI_API_KEY_SECURE] }.first()
+            _geminiApiKey.value = encrypted?.let { decrypt(it) } ?: ""
+        }
+    }
+
     companion object {
-        val GEMINI_API_KEY = stringPreferencesKey("gemini_api_key")
+        val GEMINI_API_KEY_SECURE = stringPreferencesKey("gemini_api_key_secure")
         val GEMINI_MODEL = stringPreferencesKey("gemini_model")
         val GOOGLE_GROUNDING_ENABLED = booleanPreferencesKey("google_grounding_enabled")
         val GEMINI_THINKING_LEVEL = stringPreferencesKey("gemini_thinking_level")
@@ -66,7 +117,10 @@ preferences ->
     }
 
     suspend fun saveGeminiApiKey(apiKey: String) {
-        encryptedPrefs.edit().putString("gemini_api_key", apiKey).apply()
+        val encrypted = encrypt(apiKey)
+        context.dataStore.edit { preferences ->
+            preferences[GEMINI_API_KEY_SECURE] = encrypted
+        }
         _geminiApiKey.value = apiKey
     }
 

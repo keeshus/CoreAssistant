@@ -113,12 +113,24 @@ fun SettingsScreen(
         }
     })
 
-    val apiKey by viewModel.apiKey.collectAsState()
+    val apiKeyPref by viewModel.apiKey.collectAsState()
     val selectedModel by viewModel.selectedModel.collectAsState()
     val groundingEnabled by viewModel.groundingEnabled.collectAsState()
-    val conversationsLimit by viewModel.conversationsLimit.collectAsState()
+    val conversationsLimitPref by viewModel.conversationsLimit.collectAsState()
     val thinkingLevel by viewModel.thinkingLevel.collectAsState()
     val availableModels = viewModel.availableModels
+
+    var apiKey by remember { mutableStateOf("") }
+    var conversationsLimit by remember { mutableStateOf("") }
+
+    LaunchedEffect(apiKeyPref) {
+        if (apiKey != apiKeyPref) apiKey = apiKeyPref
+    }
+    LaunchedEffect(conversationsLimitPref) {
+        if (conversationsLimit != conversationsLimitPref.toString()) {
+            conversationsLimit = conversationsLimitPref.toString()
+        }
+    }
 
     var expanded by remember { mutableStateOf(false) }
     var thinkingExpanded by remember { mutableStateOf(false) }
@@ -145,7 +157,10 @@ fun SettingsScreen(
         ) {
             OutlinedTextField(
                 value = apiKey,
-                onValueChange = { viewModel.saveApiKey(it) },
+                onValueChange = { 
+                    apiKey = it
+                    viewModel.saveApiKey(it) 
+                },
                 label = { Text("Gemini API Key") },
                 modifier = Modifier.fillMaxWidth(),
                 singleLine = true,
@@ -228,8 +243,11 @@ fun SettingsScreen(
             }
 
             OutlinedTextField(
-                value = conversationsLimit.toString(),
-                onValueChange = { viewModel.saveConversationsLimit(it) },
+                value = conversationsLimit,
+                onValueChange = { 
+                    conversationsLimit = it
+                    viewModel.saveConversationsLimit(it) 
+                },
                 label = { Text("Max Conversations to Keep") },
                 modifier = Modifier.fillMaxWidth(),
                 singleLine = true

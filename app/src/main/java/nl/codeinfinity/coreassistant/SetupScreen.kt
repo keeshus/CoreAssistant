@@ -52,8 +52,19 @@ fun SetupScreen(
         }
     })
 
-    val apiKey by viewModel.apiKey.collectAsState()
-    val userName by viewModel.userName.collectAsState()
+    val apiKeyPref by viewModel.apiKey.collectAsState()
+    val userNamePref by viewModel.userName.collectAsState()
+
+    var apiKey by remember { mutableStateOf("") }
+    var userName by remember { mutableStateOf("") }
+
+    LaunchedEffect(apiKeyPref) {
+        if (apiKey != apiKeyPref) apiKey = apiKeyPref
+    }
+    LaunchedEffect(userNamePref) {
+        if (userName != userNamePref) userName = userNamePref
+    }
+
     var apiKeyVisible by remember { mutableStateOf(false) }
 
     Column(
@@ -83,7 +94,10 @@ fun SetupScreen(
 
         OutlinedTextField(
             value = userName,
-            onValueChange = { viewModel.saveUserName(it) },
+            onValueChange = { 
+                userName = it
+                viewModel.saveUserName(it) 
+            },
             label = { Text("Your Name") },
             modifier = Modifier.fillMaxWidth(),
             singleLine = true
@@ -93,7 +107,10 @@ fun SetupScreen(
         
         OutlinedTextField(
             value = apiKey,
-            onValueChange = { viewModel.saveApiKey(it) },
+            onValueChange = { 
+                apiKey = it
+                viewModel.saveApiKey(it) 
+            },
             label = { Text("Gemini API Key") },
             modifier = Modifier.fillMaxWidth(),
             singleLine = true,
