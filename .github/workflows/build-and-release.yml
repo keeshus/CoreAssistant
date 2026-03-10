@@ -27,29 +27,34 @@ jobs:
 
       - name: Sign APK
         id: sign_app
+        env:
+          JAVA_OPTS: "--enable-native-access=ALL-UNNAMED"
         run: |
-          # Debug info
-          java -version
-          echo "Android Home: ${ANDROID_HOME}"
-          ls -l ${ANDROID_HOME}/build-tools/
-          
           # Create a temporary file for the signing key
-          # Using printf to avoid trailing newline issues
-          printf "%s" "${{ secrets.SIGNING_KEY }}" | base64 --decode > release.jks
+          if [ -z "${{ secrets.SIGNING_KEY }}" ]; then
+            echo "Error: SIGNING_KEY secret is empty. Please check your GitHub repository secrets."
+            exit 1
+          fi
+
+          echo "${{ secrets.SIGNING_KEY }}" | base64 --decode > release.jks
           
-          # Check keystore file
-          ls -l release.jks
-          file release.jks || echo "file command not found"
+          # Check if the keystore file was created and is not empty
+          if [ ! -s release.jks ]; then
+            echo "Error: release.jks is empty. This usually means the SIGNING_KEY secret is not valid base64."
+            echo "Please ensure you encoded your keystore with: base64 -w 0 your_keystore.jks"
+            exit 1
+          fi
           
           # Find the unsigned APK
           APK_PATH=$(find app/build/outputs/apk/release -name "*.apk" | head -n 1)
-          echo "APK Path: $APK_PATH"
+          if [ -z "$APK_PATH" ]; then
+            echo "Error: Could not find unsigned APK."
+            exit 1
+          fi
           SIGNED_APK_PATH="${APK_PATH%.apk}-signed.apk"
           
-          # Sign the APK using apksigner
-          # Adding --enable-native-access=ALL-UNNAMED might help with warnings,
-          # but the error is the main issue.
-          ${ANDROID_HOME}/build-tools/34.0.0/apksigner sign \
+          # Sign the APK using apksigner (using newer build-tools 36.1.0)
+          ${ANDROID_HOME}/build-tools/36.1.0/apksigner sign \
             --ks release.jks \
             --ks-key-alias "${{ secrets.KEY_ALIAS }}" \
             --ks-pass pass:"${{ secrets.KEYSTORE_PASSWORD }}" \
