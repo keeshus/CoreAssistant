@@ -28,9 +28,11 @@ import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.input.key.*
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.LocalUriHandler
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
@@ -451,16 +453,25 @@ fun ChatScreen(
             )
         }
     ) { padding ->
-        Column(modifier = modifier
-            .fillMaxSize()
-            .padding(padding)
-            .imePadding()
-            .padding(16.dp)) {
-            LazyColumn(
-                state = listState,
-                modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(padding),
+            contentAlignment = Alignment.TopCenter
+        ) {
+            Column(
+                modifier = modifier
+                    .fillMaxWidth()
+                    .widthIn(max = 800.dp)
+                    .fillMaxHeight()
+                    .imePadding()
+                    .padding(16.dp)
             ) {
+                LazyColumn(
+                    state = listState,
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
                 items(messages) { message ->
                     MessageBubble(message, userName)
                 }
@@ -531,23 +542,47 @@ fun ChatScreen(
         }
     }
 }
+}
 
 @Composable
 fun MessageBubble(message: ChatMessage, userName: String) {
     val alignment = if (message.isUser) Alignment.End else Alignment.Start
     val containerColor = if (message.isUser) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.secondaryContainer
+    val context = LocalContext.current
+    val clipboardManager = LocalClipboardManager.current
 
     Column(modifier = Modifier.fillMaxWidth(), horizontalAlignment = alignment) {
-        Text(
-            text = if (message.isUser) userName else "Gemini",
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.secondary,
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
-        )
+        ) {
+            Text(
+                text = if (message.isUser) userName else "Gemini",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.secondary
+            )
+            if (!message.isLoading && message.text.isNotBlank()) {
+                Spacer(modifier = Modifier.width(4.dp))
+                IconButton(
+                    onClick = { 
+                        clipboardManager.setText(AnnotatedString(message.text))
+                        android.widget.Toast.makeText(context, "Copied to clipboard", android.widget.Toast.LENGTH_SHORT).show()
+                    },
+                    modifier = Modifier.size(16.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.ContentCopy,
+                        contentDescription = "Copy",
+                        modifier = Modifier.size(12.dp),
+                        tint = MaterialTheme.colorScheme.secondary
+                    )
+                }
+            }
+        }
         Surface(
             shape = MaterialTheme.shapes.medium,
             color = containerColor,
-            modifier = Modifier.padding(vertical = 4.dp).widthIn(max = 340.dp)
+            modifier = Modifier.padding(vertical = 4.dp).widthIn(max = 600.dp)
         ) {
             Column(modifier = Modifier.padding(12.dp)) {
                 if (message.isLoading) {
