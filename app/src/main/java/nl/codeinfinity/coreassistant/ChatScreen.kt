@@ -1,35 +1,32 @@
 package nl.codeinfinity.coreassistant
 
-import android.Manifest
 import android.content.Context
-import nl.codeinfinity.coreassistant.Part as GeminiPart
-import androidx.compose.animation.*
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
+import android.provider.OpenableColumns
+import android.util.Base64
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.KeyboardArrowDown
-import androidx.compose.material.icons.filled.KeyboardArrowUp
-import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.key.*
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
@@ -43,29 +40,19 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
+import coil.compose.AsyncImage
 import com.mikepenz.markdown.m3.Markdown
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.flow.SharingStarted
-import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.flow.map
-import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import retrofit2.HttpException
-import java.io.IOException
-import android.net.ConnectivityManager
-import android.net.NetworkCapabilities
-import android.provider.OpenableColumns
-import android.util.Base64
-import androidx.annotation.RequiresPermission
-import coil.compose.AsyncImage
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.MultipartBody
 import okhttp3.RequestBody.Companion.asRequestBody
-import okhttp3.RequestBody.Companion.toRequestBody
 import java.io.File
 import java.io.FileOutputStream
+import nl.codeinfinity.coreassistant.Part as GeminiPart
+import androidx.core.net.toUri
 
 data class ChatMessage(
     val text: String,
@@ -80,7 +67,7 @@ class ChatViewModel(
     private val conversationId: Long,
     private val chatDao: ChatDao,
     private val settingsManager: SettingsManager,
-    private val context: android.content.Context
+    private val context: Context
 ) : ViewModel() {
     val messages: StateFlow<List<ChatMessage>> = chatDao.getMessagesForConversation(conversationId)
         .map { entities ->
@@ -113,7 +100,7 @@ class ChatViewModel(
     }
 
     private suspend fun prepareAttachmentPart(attachment: Attachment, apiKey: String): GeminiPart? {
-        val uri = android.net.Uri.parse(attachment.uri)
+        val uri = attachment.uri.toUri()
         val fileSize = attachment.fileSize
         val mimeType = attachment.mimeType
 
@@ -147,7 +134,7 @@ class ChatViewModel(
         }
         return withContext(Dispatchers.IO) {
             try {
-                val uri = android.net.Uri.parse(attachment.uri)
+                val uri = attachment.uri.toUri()
                 val inputStream = context.contentResolver.openInputStream(uri) ?: return@withContext null
                 
                 // Create a temporary file to use with asRequestBody
@@ -368,7 +355,7 @@ class ChatViewModel(
                     else -> "API Error (${e.code()}): $descriptiveMessage"
                 }
                 _loadingMessage.value = ChatMessage(userFriendlyMessage, isUser = false)
-            } catch (e: java.io.IOException) {
+            } catch (_: java.io.IOException) {
                 _loadingMessage.value = ChatMessage("Network Error: Please check your connection.", isUser = false)
             } catch (e: Exception) {
                 _loadingMessage.value = ChatMessage("Error: ${e.message}", isUser = false)
@@ -381,7 +368,7 @@ class ChatViewModelFactory(
     private val conversationId: Long,
     private val chatDao: ChatDao,
     private val settingsManager: SettingsManager,
-    private val context: android.content.Context
+    private val context: Context
 ) : ViewModelProvider.Factory {
     override fun <T : ViewModel> create(modelClass: Class<T>): T {
         if (modelClass.isAssignableFrom(ChatViewModel::class.java)) {
@@ -418,7 +405,7 @@ fun ChatScreen(
     val loadingMessage = viewModel.loadingMessage
     var inputText by remember { mutableStateOf("") }
     val listState = rememberLazyListState()
-    val keyboardController = LocalSoftwareKeyboardController.current
+    LocalSoftwareKeyboardController.current
 
     LaunchedEffect(messages.size, loadingMessage) {
         if (messages.isNotEmpty() || loadingMessage != null) {
@@ -779,7 +766,7 @@ fun GroundingDrawer(metadata: GroundingMetadata) {
                     }
                 }
                 
-                metadata.searchEntryPoint?.html?.let { html ->
+                metadata.searchEntryPoint?.html?.let { _ ->
                     Text(
                         text = "Google Search results are available for this response.",
                         style = MaterialTheme.typography.labelSmall,
