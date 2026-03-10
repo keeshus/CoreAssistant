@@ -1,11 +1,17 @@
 package nl.codeinfinity.coreassistant
 
+import com.google.gson.annotations.SerializedName
+import okhttp3.MultipartBody
 import okhttp3.OkHttpClient
+import okhttp3.RequestBody
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
 import retrofit2.http.Body
 import retrofit2.http.GET
+import retrofit2.http.Header
+import retrofit2.http.Multipart
 import retrofit2.http.POST
+import retrofit2.http.Part as RetrofitPart
 import retrofit2.http.Path
 import retrofit2.http.Query
 import java.util.concurrent.TimeUnit
@@ -22,6 +28,13 @@ interface GeminiApiService {
         @Query("key") apiKey: String,
         @Body request: GenerateContentRequest
     ): GenerateContentResponse
+
+    @POST("v1beta/files")
+    suspend fun uploadFile(
+        @Query("key") apiKey: String,
+        @Header("X-Goog-Upload-Protocol") protocol: String = "multipart",
+        @Body body: RequestBody
+    ): FileUploadResponse
 
     companion object {
         private const val BASE_URL = "https://generativelanguage.googleapis.com/"
@@ -62,12 +75,40 @@ data class ThinkingConfig(
 
 data class Content(
     val role: String? = null,
-    val parts: List<Part>
+    val parts: List<nl.codeinfinity.coreassistant.Part>
 )
 
 data class Part(
-    val text: String? = null,
-    val thought: Boolean? = null
+    @SerializedName("text") val text: String? = null,
+    @SerializedName("thought") val thought: Boolean? = null,
+    @SerializedName("inline_data") val inlineData: InlineData? = null,
+    @SerializedName("file_data") val fileData: FileData? = null
+)
+
+data class InlineData(
+    val mimeType: String,
+    val data: String
+)
+
+data class FileData(
+    val mimeType: String,
+    val fileUri: String
+)
+
+data class FileUploadResponse(
+    val file: GeminiFile
+)
+
+data class GeminiFile(
+    val name: String,
+    val displayName: String,
+    val mimeType: String,
+    val sizeBytes: String,
+    val createTime: String,
+    val updateTime: String,
+    val expirationTime: String,
+    val sha256Hash: String,
+    val uri: String
 )
 
 data class Tool(
@@ -83,10 +124,10 @@ data class GenerateContentResponse(
     val error: GeminiError? = null
 ) {
     val text: String?
-        get() = candidates?.firstOrNull()?.content?.parts?.find { it.thought != true }?.text
+        get() = candidates?.firstOrNull()?.content?.parts?.find { (it.thought == null || it.thought == false) && it.text != null }?.text
         
     val thought: String?
-        get() = candidates?.firstOrNull()?.content?.parts?.find { it.thought == true }?.text
+        get() = candidates?.firstOrNull()?.content?.parts?.find { it.thought == true && it.text != null }?.text
         
     val groundingMetadata: GroundingMetadata?
         get() = candidates?.firstOrNull()?.groundingMetadata

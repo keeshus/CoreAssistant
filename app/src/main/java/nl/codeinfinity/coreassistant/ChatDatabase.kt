@@ -2,6 +2,7 @@ package nl.codeinfinity.coreassistant
 
 import androidx.room.*
 import com.google.gson.Gson
+import com.google.gson.reflect.TypeToken
 import kotlinx.coroutines.flow.Flow
 
 @Entity(tableName = "conversations")
@@ -9,6 +10,14 @@ data class Conversation(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
     val title: String,
     val lastModified: Long = System.currentTimeMillis()
+)
+
+data class Attachment(
+    val uri: String, // Local Content URI
+    val mimeType: String,
+    val fileName: String,
+    val fileSize: Long,
+    val remoteUri: String? = null // Gemini File API URI if uploaded
 )
 
 @Entity(
@@ -30,6 +39,7 @@ data class MessageEntity(
     val isUser: Boolean,
     val thought: String? = null,
     val groundingMetadata: GroundingMetadata? = null,
+    val attachments: List<Attachment>? = null,
     val timestamp: Long = System.currentTimeMillis()
 )
 
@@ -42,6 +52,17 @@ class Converters {
     @TypeConverter
     fun toGroundingMetadata(value: String?): GroundingMetadata? {
         return Gson().fromJson(value, GroundingMetadata::class.java)
+    }
+
+    @TypeConverter
+    fun fromAttachmentList(value: List<Attachment>?): String? {
+        return Gson().toJson(value)
+    }
+
+    @TypeConverter
+    fun toAttachmentList(value: String?): List<Attachment>? {
+        val listType = object : TypeToken<List<Attachment>>() {}.type
+        return Gson().fromJson(value, listType)
     }
 }
 
@@ -80,7 +101,7 @@ interface ChatDao {
     suspend fun deleteOldConversations(limit: Int)
 }
 
-@Database(entities = [Conversation::class, MessageEntity::class], version = 2, exportSchema = false)
+@Database(entities = [Conversation::class, MessageEntity::class], version = 3, exportSchema = false)
 @TypeConverters(Converters::class)
 abstract class ChatDatabase : RoomDatabase() {
     abstract fun chatDao(): ChatDao
@@ -97,7 +118,7 @@ abstract class ChatDatabase : RoomDatabase() {
                     "chat_database"
                 )
                 // TODO: Replace with proper migrations before production release
-                // Current version is 2. Fallback to destructive migration is used for simplicity during development.
+                // Current version is 3. Fallback to destructive migration is used for simplicity during development.
                 .fallbackToDestructiveMigration(true)
                 .build()
                 INSTANCE = instance

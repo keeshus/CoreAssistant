@@ -1,5 +1,8 @@
 package nl.codeinfinity.coreassistant
 
+import android.Manifest
+import android.content.Context
+import nl.codeinfinity.coreassistant.Part as GeminiPart
 import androidx.compose.animation.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -8,16 +11,21 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -46,19 +54,33 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import retrofit2.HttpException
 import java.io.IOException
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
+import android.provider.OpenableColumns
+import android.util.Base64
+import androidx.annotation.RequiresPermission
+import coil.compose.AsyncImage
+import okhttp3.MediaType.Companion.toMediaTypeOrNull
+import okhttp3.MultipartBody
+import okhttp3.RequestBody.Companion.asRequestBody
+import okhttp3.RequestBody.Companion.toRequestBody
+import java.io.File
+import java.io.FileOutputStream
 
 data class ChatMessage(
     val text: String,
     val isUser: Boolean,
     val thought: String? = null,
     val groundingMetadata: GroundingMetadata? = null,
+    val attachments: List<Attachment>? = null,
     val isLoading: Boolean = false
 )
 
 class ChatViewModel(
     private val conversationId: Long,
     private val chatDao: ChatDao,
-    private val settingsManager: SettingsManager
+    private val settingsManager: SettingsManager,
+    private val context: android.content.Context
 ) : ViewModel() {
     val messages: StateFlow<List<ChatMessage>> = chatDao.getMessagesForConversation(conversationId)
         .map { entities ->
@@ -67,7 +89,8 @@ class ChatViewModel(
                     text = entity.text,
                     isUser = entity.isUser,
                     thought = entity.thought,
-                    groundingMetadata = entity.groundingMetadata
+                    groundingMetadata = entity.groundingMetadata,
+                    attachments = entity.attachments
                 )
             }
         }
@@ -78,13 +101,113 @@ class ChatViewModel(
 
     private val apiService = GeminiApiService.create()
 
+    private val _selectedAttachments = mutableStateListOf<Attachment>()
+    val selectedAttachments: List<Attachment> get() = _selectedAttachments
+
+    fun addAttachments(attachments: List<Attachment>) {
+        _selectedAttachments.addAll(attachments)
+    }
+
+    fun removeAttachment(attachment: Attachment) {
+        _selectedAttachments.remove(attachment)
+    }
+
+    private suspend fun prepareAttachmentPart(attachment: Attachment, apiKey: String): GeminiPart? {
+        val uri = android.net.Uri.parse(attachment.uri)
+        val fileSize = attachment.fileSize
+        val mimeType = attachment.mimeType
+
+        return if (fileSize < 20 * 1024 * 1024) {
+            // Inline data
+            val bytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: return null
+            val base64Data = Base64.encodeToString(bytes, Base64.NO_WRAP)
+            GeminiPart(inlineData = InlineData(mimeType = mimeType, data = base64Data))
+        } else {
+            // File API
+            val remoteUri = attachment.remoteUri ?: uploadToFileApi(attachment, apiKey) ?: return null
+            GeminiPart(fileData = FileData(mimeType = mimeType, fileUri = remoteUri))
+        }
+    }
+
+    private fun isNetworkAvailable(): Boolean {
+        val connectivityManager = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+        val network = connectivityManager.activeNetwork ?: return false
+        val activeNetwork = connectivityManager.getNetworkCapabilities(network) ?: return false
+        return when {
+            activeNetwork.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) -> true
+            activeNetwork.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) -> true
+            activeNetwork.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET) -> true
+            else -> false
+        }
+    }
+
+    private suspend fun uploadToFileApi(attachment: Attachment, apiKey: String): String? {
+        if (!isNetworkAvailable()) {
+            return null
+        }
+        return withContext(Dispatchers.IO) {
+            try {
+                val uri = android.net.Uri.parse(attachment.uri)
+                val inputStream = context.contentResolver.openInputStream(uri) ?: return@withContext null
+                
+                // Create a temporary file to use with asRequestBody
+                val tempFile = File(context.cacheDir, "upload_${System.currentTimeMillis()}_${attachment.fileName}")
+                FileOutputStream(tempFile).use { output ->
+                    inputStream.copyTo(output)
+                }
+
+                val mediaType = attachment.mimeType.toMediaTypeOrNull()
+                val requestFile = tempFile.asRequestBody(mediaType)
+                
+                val multipartBody = MultipartBody.Builder()
+                    .setType(MultipartBody.FORM)
+                    .addPart(
+                        MultipartBody.Part.createFormData(
+                            "file",
+                            attachment.fileName,
+                            requestFile
+                        )
+                    )
+                    .build()
+
+                // Actually Gemini File API (multipart) expects a specific structure if using simple POST.
+                // The documentation says:
+                // POST https://upload.googleapis.com/v1beta/files?key=$API_KEY
+                // X-Goog-Upload-Protocol: multipart
+                
+                // Retrofit @Body with RequestBody works.
+                val response = apiService.uploadFile(apiKey = apiKey, body = multipartBody)
+                tempFile.delete()
+                
+                val remoteUri = response.file.uri
+                
+                // Update attachment in DB if possible (though we don't have messageId here yet easily)
+                // For now just return it to be used in current request.
+                remoteUri
+            } catch (e: Exception) {
+                android.util.Log.e("ChatViewModel", "Upload failed", e)
+                null
+            }
+        }
+    }
+
     fun sendMessage(userText: String) {
-        if (userText.isBlank()) return
+        if (userText.isBlank() && _selectedAttachments.isEmpty()) return
+
+        val attachmentsToSend = _selectedAttachments.toList()
+        _selectedAttachments.clear()
 
         viewModelScope.launch {
             // Save user message to DB
             withContext(Dispatchers.IO) {
-                chatDao.insertMessage(MessageEntity(conversationId = conversationId, text = userText, isUser = true))
+                chatDao.insertMessage(
+                    MessageEntity(
+                        conversationId = conversationId,
+                        text = userText,
+                        isUser = true,
+                        attachments = if (attachmentsToSend.isNotEmpty()) attachmentsToSend else null
+                    )
+                )
             }
             
             // Update conversation timestamp and title if it was "New Chat"
@@ -125,8 +248,57 @@ class ChatViewModel(
                 val historyEntities = withContext(Dispatchers.IO) {
                     chatDao.getMessagesForConversationSync(conversationId)
                 }
-                val contents = historyEntities.map { msg ->
-                    Content(role = if (msg.isUser) "user" else "model", parts = listOf(Part(text = msg.text)))
+                
+                // Convert history to Content objects, handling attachments for the last message
+                val contents = historyEntities.mapIndexed { index, msg ->
+                    val parts = mutableListOf<GeminiPart>()
+                    
+                    if (msg.text.isNotBlank()) {
+                        parts.add(GeminiPart(text = msg.text))
+                    }
+                    
+                    // Only process attachments for the current message being sent (which is the last one in history)
+                    // or if they were already processed and stored with remoteUri.
+                    // For simplicity and to avoid re-uploading, we check if attachments exist.
+                    msg.attachments?.forEach { attachment ->
+                        if (index == historyEntities.lastIndex && msg.isUser) {
+                            // This is the message we just sent, we need to prepare the parts (upload if needed)
+                            val part = prepareAttachmentPart(attachment, apiKey)
+                            if (part != null) {
+                                parts.add(part)
+                                
+                                // If it was a File API upload, we should update the DB with the remoteUri
+                                if (part.fileData != null && attachment.remoteUri == null) {
+                                    val updatedAttachment = attachment.copy(remoteUri = part.fileData.fileUri)
+                                    val updatedAttachments = msg.attachments.map {
+                                        if (it.uri == attachment.uri) updatedAttachment else it
+                                    }
+                                    withContext(Dispatchers.IO) {
+                                        // Update the message in DB. We need to find the entity first to get its ID.
+                                        val history = chatDao.getMessagesForConversationSync(conversationId)
+                                        val entityToUpdate = history.getOrNull(index)
+                                        if (entityToUpdate != null) {
+                                            chatDao.insertMessage(entityToUpdate.copy(attachments = updatedAttachments))
+                                        }
+                                    }
+                                }
+                            } else {
+                                // Failed to prepare/upload attachment
+                                throw Exception("Failed to process attachment: ${attachment.fileName}")
+                            }
+                        } else if (attachment.remoteUri != null) {
+                            // History message with already uploaded file
+                            parts.add(GeminiPart(fileData = FileData(mimeType = attachment.mimeType, fileUri = attachment.remoteUri)))
+                        }
+                        // Note: Inline data for history is tricky because we don't store the base64 in DB.
+                        // Gemini usually expects the full context. If it's inline, we'd have to re-read and re-encode.
+                        else if (attachment.fileSize < 20 * 1024 * 1024) {
+                            val part = prepareAttachmentPart(attachment, apiKey)
+                            if (part != null) parts.add(part)
+                        }
+                    }
+
+                    Content(role = if (msg.isUser) "user" else "model", parts = parts.toList())
                 }
 
                 val thinkingLevel = settingsManager.geminiThinkingLevel.first()
@@ -208,12 +380,13 @@ class ChatViewModel(
 class ChatViewModelFactory(
     private val conversationId: Long,
     private val chatDao: ChatDao,
-    private val settingsManager: SettingsManager
+    private val settingsManager: SettingsManager,
+    private val context: android.content.Context
 ) : ViewModelProvider.Factory {
     override fun <T : ViewModel> create(modelClass: Class<T>): T {
         if (modelClass.isAssignableFrom(ChatViewModel::class.java)) {
             @Suppress("UNCHECKED_CAST")
-            return ChatViewModel(conversationId, chatDao, settingsManager) as T
+            return ChatViewModel(conversationId, chatDao, settingsManager, context) as T
         }
         throw IllegalArgumentException("Unknown ViewModel class")
     }
@@ -233,7 +406,8 @@ fun ChatScreen(
             ChatViewModelFactory(
                 conversationId = conversationId,
                 chatDao = ChatDatabase.getDatabase(context).chatDao(),
-                settingsManager = SettingsManager(context)
+                settingsManager = SettingsManager(context),
+                context = context
             )
         }
     )
@@ -250,6 +424,32 @@ fun ChatScreen(
         if (messages.isNotEmpty() || loadingMessage != null) {
             listState.animateScrollToItem((messages.size + (if (loadingMessage != null) 1 else 0)))
         }
+    }
+
+    val filePickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetMultipleContents()
+    ) { uris ->
+        val attachments = uris.map { uri ->
+            var fileName = "unknown"
+            var fileSize = 0L
+            val mimeType = context.contentResolver.getType(uri) ?: "application/octet-stream"
+
+            context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+                val nameIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                val sizeIndex = cursor.getColumnIndex(OpenableColumns.SIZE)
+                if (cursor.moveToFirst()) {
+                    fileName = cursor.getString(nameIndex)
+                    fileSize = cursor.getLong(sizeIndex)
+                }
+            }
+            Attachment(
+                uri = uri.toString(),
+                mimeType = mimeType,
+                fileName = fileName,
+                fileSize = fileSize
+            )
+        }
+        viewModel.addAttachments(attachments)
     }
 
     Scaffold(
@@ -282,10 +482,29 @@ fun ChatScreen(
                 }
             }
             
+            if (viewModel.selectedAttachments.isNotEmpty()) {
+                LazyRow(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    items(viewModel.selectedAttachments) { attachment ->
+                        AttachmentChip(
+                            attachment = attachment,
+                            onRemove = { viewModel.removeAttachment(attachment) }
+                        )
+                    }
+                }
+            }
+
             Row(
                 modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
+                IconButton(onClick = { filePickerLauncher.launch("*/*") }) {
+                    Icon(Icons.Default.Add, contentDescription = "Attach Files")
+                }
                 OutlinedTextField(
                     value = inputText,
                     onValueChange = { inputText = it },
@@ -351,6 +570,11 @@ fun MessageBubble(message: ChatMessage, userName: String) {
                         color = MaterialTheme.colorScheme.onSecondaryContainer
                     )
                 } else {
+                    message.attachments?.let { attachments ->
+                        AttachmentPreviewGrid(attachments = attachments)
+                        Spacer(modifier = Modifier.height(8.dp))
+                    }
+
                     if (message.thought != null) {
                         ThoughtDrawer(thought = message.thought)
                         Spacer(modifier = Modifier.height(8.dp))
@@ -407,6 +631,82 @@ fun ThoughtDrawer(thought: String) {
                 modifier = Modifier.padding(top = 4.dp),
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
+        }
+    }
+}
+
+@Composable
+fun AttachmentChip(
+    attachment: Attachment,
+    onRemove: () -> Unit
+) {
+    Surface(
+        shape = RoundedCornerShape(16.dp),
+        color = MaterialTheme.colorScheme.secondaryContainer,
+        modifier = Modifier.padding(vertical = 4.dp)
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.padding(start = 8.dp, end = 4.dp, top = 4.dp, bottom = 4.dp)
+        ) {
+            if (attachment.mimeType.startsWith("image/")) {
+                AsyncImage(
+                    model = attachment.uri,
+                    contentDescription = null,
+                    modifier = Modifier
+                        .size(24.dp)
+                        .clip(RoundedCornerShape(4.dp))
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+            }
+            Text(
+                text = attachment.fileName,
+                style = MaterialTheme.typography.labelMedium,
+                maxLines = 1
+            )
+            IconButton(onClick = onRemove, modifier = Modifier.size(24.dp)) {
+                Icon(Icons.Default.Close, contentDescription = "Remove", modifier = Modifier.size(16.dp))
+            }
+        }
+    }
+}
+
+@Composable
+fun AttachmentPreviewGrid(attachments: List<Attachment>) {
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        attachments.forEach { attachment ->
+            Surface(
+                shape = RoundedCornerShape(8.dp),
+                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.padding(8.dp)
+                ) {
+                    if (attachment.mimeType.startsWith("image/")) {
+                        AsyncImage(
+                            model = attachment.uri,
+                            contentDescription = null,
+                            modifier = Modifier
+                                .size(40.dp)
+                                .clip(RoundedCornerShape(4.dp))
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                    }
+                    Column {
+                        Text(
+                            text = attachment.fileName,
+                            style = MaterialTheme.typography.labelMedium,
+                            maxLines = 1
+                        )
+                        Text(
+                            text = "${attachment.fileSize / 1024} KB",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+            }
         }
     }
 }
@@ -475,6 +775,7 @@ fun GroundingDrawer(metadata: GroundingMetadata) {
                                 )
                             }
                         }
+                        
                     }
                 }
                 

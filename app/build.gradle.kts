@@ -72,6 +72,9 @@ dependencies {
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.material:material-icons-core")
     implementation("androidx.compose.material:material-icons-extended")
+
+    // Coil for image loading
+    implementation("io.coil-kt:coil-compose:2.7.0")
     
     // Gemini REST API (Retrofit)
     implementation("com.squareup.retrofit2:retrofit:3.0.0")
