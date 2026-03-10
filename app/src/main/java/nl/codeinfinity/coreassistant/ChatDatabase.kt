@@ -80,7 +80,7 @@ interface ChatDao {
     suspend fun deleteOldConversations(limit: Int)
 }
 
-@Database(entities = [Conversation::class, MessageEntity::class], version = 2)
+@Database(entities = [Conversation::class, MessageEntity::class], version = 2, exportSchema = false)
 @TypeConverters(Converters::class)
 abstract class ChatDatabase : RoomDatabase() {
     abstract fun chatDao(): ChatDao
@@ -98,7 +98,7 @@ abstract class ChatDatabase : RoomDatabase() {
                 )
                 // TODO: Replace with proper migrations before production release
                 // Current version is 2. Fallback to destructive migration is used for simplicity during development.
-                .fallbackToDestructiveMigration()
+                .fallbackToDestructiveMigration(true)
                 .build()
                 INSTANCE = instance
                 instance

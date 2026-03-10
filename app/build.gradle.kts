@@ -13,8 +13,8 @@ android {
         applicationId = "nl.codeinfinity.coreassistant"
         minSdk = 26
         targetSdk = 34
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = project.findProperty("versionCode")?.toString()?.toInt() ?: 3
+        versionName = project.findProperty("versionName")?.toString() ?: "0.0.3"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
@@ -43,6 +43,10 @@ android {
     packaging {
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
+        }
+        jniLibs {
+            keepDebugSymbols += "**/libandroidx.graphics.path.so"
+            keepDebugSymbols += "**/libdatastore_shared_counter.so"
         }
     }
 }

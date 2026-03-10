@@ -5,8 +5,8 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.ArrowDropDown
-import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.*
@@ -110,6 +110,7 @@ fun SettingsScreen(
     settingsManager: SettingsManager = SettingsManager(LocalContext.current)
 ) {
     val viewModel: SettingsViewModel = viewModel(factory = object : androidx.lifecycle.ViewModelProvider.Factory {
+        @Suppress("UNCHECKED_CAST")
         override fun <T : ViewModel> create(modelClass: Class<T>): T {
             return SettingsViewModel(settingsManager) as T
         }
@@ -144,7 +145,7 @@ fun SettingsScreen(
                 title = { Text("Settings") },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
-                        Icon(Icons.Default.ArrowBack, contentDescription = "Back")
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                     }
                 }
             )
@@ -185,10 +186,11 @@ fun SettingsScreen(
             ) {
                 Text("Refresh Models")
             }
-
+            
             Box(modifier = Modifier.fillMaxWidth()) {
                 OutlinedTextField(
-                    value = availableModels.find { it.name == selectedModel }?.displayName ?: selectedModel,
+                    value = availableModels.find { it.name == selectedModel }?.displayName
+                        ?: selectedModel.removePrefix("models/").split("-").joinToString(" ") { it.replaceFirstChar { c -> c.uppercase() } },
                     onValueChange = { },
                     readOnly = true,
                     label = { Text("Selected Model") },

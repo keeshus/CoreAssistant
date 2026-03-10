@@ -26,8 +26,14 @@ jobs:
       - name: Make gradlew executable
         run: chmod +x ./gradlew
 
+      - name: Extract version from tag
+        id: get_version
+        run: |
+          VERSION=${GITHUB_REF_NAME#v}
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
       - name: Build APK
-        run: ./gradlew assembleRelease
+        run: ./gradlew assembleRelease -PversionName=${{ steps.get_version.outputs.version }} -PversionCode=${{ github.run_number }}
 
       - name: Sign APK
         id: sign_app

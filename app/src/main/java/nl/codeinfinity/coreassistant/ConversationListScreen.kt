@@ -55,6 +55,7 @@ fun ConversationListScreen(
     val database = ChatDatabase.getDatabase(context)
     val settingsManager = SettingsManager(context)
     val viewModel: ConversationListViewModel = viewModel(factory = object : ViewModelProvider.Factory {
+        @Suppress("UNCHECKED_CAST")
         override fun <T : ViewModel> create(modelClass: Class<T>): T {
             return ConversationListViewModel(database.chatDao(), settingsManager) as T
         }
