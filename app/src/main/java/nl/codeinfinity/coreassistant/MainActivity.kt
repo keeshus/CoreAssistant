@@ -6,14 +6,13 @@ import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.getValue
+import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
+import kotlinx.coroutines.flow.first
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -25,11 +24,22 @@ class MainActivity : ComponentActivity() {
                     color = MaterialTheme.colorScheme.background
                 ) {
                     val settingsManager = SettingsManager(LocalContext.current)
-                    val apiKey by settingsManager.geminiApiKey.collectAsState(initial = null)
+                    
+                    // Use remember to only check once when the app starts
+                    val needsSetup by remember {
+                        mutableStateOf<Boolean?>(null)
+                    }
+                    var setupDetermined by remember { mutableStateOf(false) }
+                    var initialNeedsSetup by remember { mutableStateOf(false) }
 
-                    if (apiKey != null) {
-                        val needsSetup = apiKey!!.isBlank()
-                        AppNavigation(needsSetup = needsSetup, settingsManager = settingsManager)
+                    LaunchedEffect(Unit) {
+                        val apiKey = settingsManager.geminiApiKey.first()
+                        initialNeedsSetup = apiKey.isBlank()
+                        setupDetermined = true
+                    }
+
+                    if (setupDetermined) {
+                        AppNavigation(needsSetup = initialNeedsSetup, settingsManager = settingsManager)
                     }
                 }
             }

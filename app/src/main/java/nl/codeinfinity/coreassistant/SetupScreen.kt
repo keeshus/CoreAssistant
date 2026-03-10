@@ -26,7 +26,7 @@ class SetupViewModel(private val settingsManager: SettingsManager) : ViewModel()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "")
 
     val userName: StateFlow<String> = settingsManager.userName
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "User")
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "")
 
     fun saveApiKey(key: String) {
         viewModelScope.launch {
@@ -94,11 +94,11 @@ fun SetupScreen(
 
         OutlinedTextField(
             value = userName,
-            onValueChange = { 
+            onValueChange = {
                 userName = it
-                viewModel.saveUserName(it) 
             },
             label = { Text("Your Name") },
+            placeholder = { Text("User") },
             modifier = Modifier.fillMaxWidth(),
             singleLine = true
         )
@@ -107,9 +107,8 @@ fun SetupScreen(
         
         OutlinedTextField(
             value = apiKey,
-            onValueChange = { 
+            onValueChange = {
                 apiKey = it
-                viewModel.saveApiKey(it) 
             },
             label = { Text("Gemini API Key") },
             modifier = Modifier.fillMaxWidth(),
@@ -129,12 +128,15 @@ fun SetupScreen(
         
         Button(
             onClick = {
-                if (apiKey.isNotBlank() && userName.isNotBlank()) {
+                if (apiKey.isNotBlank()) {
+                    val finalUserName = if (userName.isBlank()) "User" else userName
+                    viewModel.saveUserName(finalUserName)
+                    viewModel.saveApiKey(apiKey)
                     onSetupComplete()
                 }
             },
             modifier = Modifier.fillMaxWidth(),
-            enabled = apiKey.isNotBlank() && userName.isNotBlank()
+            enabled = apiKey.isNotBlank()
         ) {
             Text("Finish Setup")
         }

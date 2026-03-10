@@ -26,14 +26,29 @@ jobs:
         run: ./gradlew assembleRelease
 
       - name: Sign APK
-        uses: ilharp/sign-android-release@v2
         id: sign_app
-        with:
-          releaseDir: app/build/outputs/apk/release
-          signingKey: ${{ secrets.SIGNING_KEY }}
-          alias: ${{ secrets.KEY_ALIAS }}
-          keyStorePassword: ${{ secrets.KEYSTORE_PASSWORD }}
-          keyPassword: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          # Create a temporary file for the signing key
+          echo "${{ secrets.SIGNING_KEY }}" | base64 --decode > release.jks
+          
+          # Find the unsigned APK
+          APK_PATH=$(find app/build/outputs/apk/release -name "*.apk" | head -n 1)
+          SIGNED_APK_PATH="${APK_PATH%.apk}-signed.apk"
+          
+          # Sign the APK using apksigner
+          ${ANDROID_HOME}/build-tools/34.0.0/apksigner sign \
+            --ks release.jks \
+            --ks-key-alias "${{ secrets.KEY_ALIAS }}" \
+            --ks-pass pass:"${{ secrets.KEYSTORE_PASSWORD }}" \
+            --key-pass pass:"${{ secrets.KEY_PASSWORD }}" \
+            --out "$SIGNED_APK_PATH" \
+            "$APK_PATH"
+          
+          # Clean up the signing key
+          rm release.jks
+          
+          # Set output for the next step
+          echo "signedReleaseFile=$SIGNED_APK_PATH" >> $GITHUB_OUTPUT
 
       - name: Create Release
         uses: softprops/action-gh-release@v1
