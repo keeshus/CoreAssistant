@@ -32,10 +32,39 @@ interface GeminiApiService {
         private const val BASE_URL = "https://generativelanguage.googleapis.com/"
 
         fun create(): GeminiApiService {
+            val userAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+            
             val okHttpClient = OkHttpClient.Builder()
                 .connectTimeout(60, TimeUnit.SECONDS)
                 .readTimeout(60, TimeUnit.SECONDS)
                 .writeTimeout(60, TimeUnit.SECONDS)
+                .addInterceptor { chain ->
+                    val original = chain.request()
+                    val builder = original.newBuilder()
+                    
+                    // Remove all existing headers to eliminate platform fingerprints
+                    original.headers.names().forEach { name ->
+                        builder.removeHeader(name)
+                    }
+                    
+                    // Add generic Chrome-like browser headers
+                    builder.header("User-Agent", userAgent)
+                    builder.header("Accept", "application/json, text/plain, */*")
+                    builder.header("Accept-Language", "en-US,en;q=0.9")
+                    builder.header("Sec-Ch-Ua", "\"Chromium\";v=\"122\", \"Not(A:Brand\";v=\"24\", \"Google Chrome\";v=\"122\"")
+                    builder.header("Sec-Ch-Ua-Mobile", "?0")
+                    builder.header("Sec-Ch-Ua-Platform", "\"Windows\"")
+                    builder.header("Sec-Fetch-Dest", "empty")
+                    builder.header("Sec-Fetch-Mode", "cors")
+                    builder.header("Sec-Fetch-Site", "cross-site")
+                    builder.header("DNT", "1")
+                    
+                    // Restore mandatory headers for functionality
+                    original.header("Content-Type")?.let { builder.header("Content-Type", it) }
+                    original.header("X-Goog-Upload-Protocol")?.let { builder.header("X-Goog-Upload-Protocol", it) }
+                    
+                    chain.proceed(builder.build())
+                }
                 .build()
 
             return Retrofit.Builder()

@@ -43,15 +43,17 @@ class SettingsViewModel(private val settingsManager: SettingsManager) : ViewMode
     val thinkingLevel: StateFlow<String> = settingsManager.geminiThinkingLevel
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "OFF")
 
+    val screenshotProtection: StateFlow<Boolean> = settingsManager.screenshotProtection
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), true)
+
+    val clearHistoryOnClose: StateFlow<Boolean> = settingsManager.clearHistoryOnClose
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
+
     private val _availableModels = mutableStateListOf<GeminiModel>()
     val availableModels: List<GeminiModel> = _availableModels
 
     private val apiService: GeminiApiService by lazy {
-        Retrofit.Builder()
-            .baseUrl("https://generativelanguage.googleapis.com/")
-            .addConverterFactory(GsonConverterFactory.create())
-            .build()
-            .create(GeminiApiService::class.java)
+        GeminiApiService.create()
     }
 
     fun fetchModels() {
@@ -99,6 +101,18 @@ class SettingsViewModel(private val settingsManager: SettingsManager) : ViewMode
             settingsManager.saveGeminiThinkingLevel(level)
         }
     }
+
+    fun saveScreenshotProtection(enabled: Boolean) {
+        viewModelScope.launch {
+            settingsManager.saveScreenshotProtection(enabled)
+        }
+    }
+
+    fun saveClearHistoryOnClose(enabled: Boolean) {
+        viewModelScope.launch {
+            settingsManager.saveClearHistoryOnClose(enabled)
+        }
+    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -120,6 +134,8 @@ fun SettingsScreen(
     val groundingEnabled by viewModel.groundingEnabled.collectAsState()
     val conversationsLimitPref by viewModel.conversationsLimit.collectAsState()
     val thinkingLevel by viewModel.thinkingLevel.collectAsState()
+    val screenshotProtection by viewModel.screenshotProtection.collectAsState()
+    val clearHistoryOnClose by viewModel.clearHistoryOnClose.collectAsState()
     val availableModels = viewModel.availableModels
 
     var apiKey by remember { mutableStateOf("") }
@@ -275,6 +291,39 @@ fun SettingsScreen(
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
+
+            HorizontalDivider()
+            Text("Privacy Settings", style = MaterialTheme.typography.titleMedium)
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("Screenshot Protection")
+                    Text("Block screenshots and hide app in recent apps", style = MaterialTheme.typography.bodySmall)
+                }
+                Switch(
+                    checked = screenshotProtection,
+                    onCheckedChange = { viewModel.saveScreenshotProtection(it) }
+                )
+            }
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("Clear History on Close")
+                    Text("Automatically delete all chats when app is closed", style = MaterialTheme.typography.bodySmall)
+                }
+                Switch(
+                    checked = clearHistoryOnClose,
+                    onCheckedChange = { viewModel.saveClearHistoryOnClose(it) }
+                )
+            }
 
             Spacer(modifier = Modifier.weight(1f))
 

@@ -1,9 +1,13 @@
 package nl.codeinfinity.coreassistant
 
+import android.util.Log
 import androidx.room.*
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.runBlocking
+import net.sqlcipher.database.SQLiteDatabase
+import net.sqlcipher.database.SupportFactory
 
 @Entity(tableName = "conversations")
 data class Conversation(
@@ -111,16 +115,48 @@ abstract class ChatDatabase : RoomDatabase() {
         private var INSTANCE: ChatDatabase? = null
 
         fun getDatabase(context: android.content.Context): ChatDatabase {
+            val dbName = "chat_database"
             return INSTANCE ?: synchronized(this) {
-                val instance = Room.databaseBuilder(
+                INSTANCE?.let { return it }
+                
+                // Initialize SQLCipher libraries
+                SQLiteDatabase.loadLibs(context.applicationContext)
+                
+                val settingsManager = SettingsManager(context.applicationContext)
+                val passphrase = runBlocking { settingsManager.getDatabasePassphrase() }
+                val factory = SupportFactory(passphrase.toByteArray())
+
+                val builder = Room.databaseBuilder(
                     context.applicationContext,
                     ChatDatabase::class.java,
-                    "chat_database"
+                    dbName
                 )
+                .openHelperFactory(factory)
                 // TODO: Replace with proper migrations before production release
                 // Current version is 3. Fallback to destructive migration is used for simplicity during development.
                 .fallbackToDestructiveMigration(true)
-                .build()
+
+                var instance = builder.build()
+                
+                // If we are not on the main thread, we can check for the passphrase error immediately.
+                // If we ARE on the main thread, we'll let the error happen when the database is actually used,
+                // or we can just hope for the best.
+                // However, the best practice is to always initialize on a background thread.
+                if (android.os.Looper.getMainLooper().thread != Thread.currentThread()) {
+                    try {
+                        // Force open the database to check if the passphrase is correct.
+                        instance.openHelper.writableDatabase
+                    } catch (e: Exception) {
+                        if (e.message?.contains("file is not a database", ignoreCase = true) == true) {
+                            Log.e("CoreAssistant", "Database encryption mismatch. Resetting database.")
+                            context.deleteDatabase(dbName)
+                            instance = builder.build()
+                        } else {
+                            throw e
+                        }
+                    }
+                }
+
                 INSTANCE = instance
                 instance
             }

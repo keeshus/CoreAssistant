@@ -1,7 +1,7 @@
 package nl.codeinfinity.coreassistant
 
 import android.os.Bundle
-import androidx.activity.ComponentActivity
+import android.view.WindowManager
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.layout.fillMaxSize
@@ -9,31 +9,53 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
+import androidx.activity.ComponentActivity
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        
+        val settingsManager = SettingsManager(this)
+        
         setContent {
             MaterialTheme {
                 Surface(
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background
                 ) {
-                    val settingsManager = SettingsManager(LocalContext.current)
+                    val screenshotProtection by settingsManager.screenshotProtection.collectAsState(initial = true)
                     
+                    LaunchedEffect(screenshotProtection) {
+                        if (screenshotProtection) {
+                            window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
+                        } else {
+                            window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
+                        }
+                    }
+
                     // Use remember to only check once when the app starts
                     var setupDetermined by remember { mutableStateOf(false) }
                     var initialNeedsSetup by remember { mutableStateOf(false) }
-
                     LaunchedEffect(Unit) {
+                        if (settingsManager.clearHistoryOnClose.first()) {
+                            withContext(Dispatchers.IO) {
+                                val db = ChatDatabase.getDatabase(this@MainActivity)
+                                db.clearAllTables()
+                            }
+                        }
+                        
                         val apiKey = settingsManager.geminiApiKey.first()
                         initialNeedsSetup = apiKey.isBlank()
+                        
+                        
                         setupDetermined = true
                     }
 
