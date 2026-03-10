@@ -264,7 +264,11 @@ fun ChatScreen(
             )
         }
     ) { padding ->
-        Column(modifier = modifier.fillMaxSize().padding(padding).padding(16.dp)) {
+        Column(modifier = modifier
+            .fillMaxSize()
+            .padding(padding)
+            .imePadding()
+            .padding(16.dp)) {
             LazyColumn(
                 state = listState,
                 modifier = Modifier.weight(1f),
