@@ -582,9 +582,14 @@ fun MessageBubble(message: ChatMessage, userName: String) {
         Surface(
             shape = MaterialTheme.shapes.medium,
             color = containerColor,
-            modifier = Modifier.padding(vertical = 4.dp).widthIn(max = 600.dp)
+            modifier = Modifier
+                .padding(vertical = 4.dp)
         ) {
-            Column(modifier = Modifier.padding(12.dp)) {
+            Column(
+                modifier = Modifier
+                    .padding(12.dp)
+                    .width(IntrinsicSize.Max)
+            ) {
                 if (message.isLoading) {
                     CircularProgressIndicator(
                         modifier = Modifier.size(24.dp),
