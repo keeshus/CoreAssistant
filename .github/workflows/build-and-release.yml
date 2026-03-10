@@ -31,11 +31,12 @@ jobs:
         env:
           JAVA_OPTS: "--enable-native-access=ALL-UNNAMED"
         run: |
-          # Create a temporary file for the signing key
-          if [ -z "${{ secrets.SIGNING_KEY }}" ]; then
-            echo "Error: SIGNING_KEY secret is empty. Please check your GitHub repository secrets."
-            exit 1
-          fi
+          # Debug: Check secret presence and lengths (do not print actual values)
+          echo "Checking secret availability..."
+          if [ -n "${{ secrets.SIGNING_KEY }}" ]; then echo "SIGNING_KEY is set (length: ${#${{ secrets.SIGNING_KEY }}})"; else echo "SIGNING_KEY is MISSING"; fi
+          if [ -n "${{ secrets.KEY_ALIAS }}" ]; then echo "KEY_ALIAS is set"; else echo "KEY_ALIAS is MISSING"; fi
+          if [ -n "${{ secrets.KEYSTORE_PASSWORD }}" ]; then echo "KEYSTORE_PASSWORD is set (length: ${#${{ secrets.KEYSTORE_PASSWORD }}})"; else echo "KEYSTORE_PASSWORD is MISSING"; fi
+          if [ -n "${{ secrets.KEY_PASSWORD }}" ]; then echo "KEY_PASSWORD is set (length: ${#${{ secrets.KEY_PASSWORD }}})"; else echo "KEY_PASSWORD is MISSING"; fi
 
           echo "${{ secrets.SIGNING_KEY }}" | base64 --decode > release.jks
           
