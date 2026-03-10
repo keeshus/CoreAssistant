@@ -1,6 +1,5 @@
 package nl.codeinfinity.coreassistant
 
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -22,7 +21,6 @@ import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import retrofit2.Retrofit
@@ -66,7 +64,7 @@ class SettingsViewModel(private val settingsManager: SettingsManager) : ViewMode
                     // Filter for generateContent compatible models (simplified check)
                     _availableModels.addAll(response.models.filter { it.name.contains("gemini") })
                 }
-            } catch (e: Exception) {
+            } catch (_: Exception) {
                 // Handle error
             }
         }
@@ -107,6 +105,7 @@ class SettingsViewModel(private val settingsManager: SettingsManager) : ViewMode
 @Composable
 fun SettingsScreen(
     onBack: () -> Unit,
+    onNavigateToLicenses: () -> Unit,
     settingsManager: SettingsManager = SettingsManager(LocalContext.current)
 ) {
     val viewModel: SettingsViewModel = viewModel(factory = object : androidx.lifecycle.ViewModelProvider.Factory {
@@ -276,6 +275,15 @@ fun SettingsScreen(
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
+
+            Spacer(modifier = Modifier.weight(1f))
+
+            Button(
+                onClick = onNavigateToLicenses,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text("View Licenses")
+            }
         }
     }
 }

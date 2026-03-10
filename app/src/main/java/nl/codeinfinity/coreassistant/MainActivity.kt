@@ -5,7 +5,6 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.*
@@ -29,9 +28,6 @@ class MainActivity : ComponentActivity() {
                     val settingsManager = SettingsManager(LocalContext.current)
                     
                     // Use remember to only check once when the app starts
-                    val needsSetup by remember {
-                        mutableStateOf<Boolean?>(null)
-                    }
                     var setupDetermined by remember { mutableStateOf(false) }
                     var initialNeedsSetup by remember { mutableStateOf(false) }
 
@@ -83,7 +79,13 @@ fun AppNavigation(needsSetup: Boolean, settingsManager: SettingsManager) {
         composable("settings") {
             SettingsScreen(
                 onBack = { navController.popBackStack() },
+                onNavigateToLicenses = { navController.navigate("licenses") },
                 settingsManager = settingsManager
+            )
+        }
+        composable("licenses") {
+            LicensesScreen(
+                onBack = { navController.popBackStack() }
             )
         }
     }
