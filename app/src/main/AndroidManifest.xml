@@ -51,7 +51,7 @@
         <!-- Recognition Service for Voice Input -->
         <service
             android:name=".AssistantRecognitionService"
-            android:exported="true">
+            android:exported="true" android:permission="TODO">
             <intent-filter>
                 <action android:name="android.speech.RecognitionService" />
                 <category android:name="android.intent.category.DEFAULT" />

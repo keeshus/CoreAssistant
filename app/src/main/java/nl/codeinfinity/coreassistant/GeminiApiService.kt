@@ -96,7 +96,7 @@ data class ThinkingConfig(
 
 data class Content(
     val role: String? = null,
-    val parts: List<nl.codeinfinity.coreassistant.Part>
+    val parts: List<Part>
 )
 
 data class Part(

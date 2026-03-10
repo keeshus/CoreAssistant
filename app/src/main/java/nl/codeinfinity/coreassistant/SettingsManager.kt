@@ -10,14 +10,9 @@ import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
-import kotlinx.coroutines.launch
 import java.security.KeyStore
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
@@ -66,7 +61,7 @@ class SettingsManager(private val context: Context) {
             val spec = GCMParameterSpec(128, iv)
             cipher.init(Cipher.DECRYPT_MODE, getOrCreateKey(alias), spec)
             String(cipher.doFinal(encryptedData), Charsets.UTF_8)
-        } catch (e: Exception) {
+        } catch (_: Exception) {
             null
         }
     }
@@ -149,10 +144,6 @@ preferences ->
         preferences[GEMINI_THINKING_LEVEL] ?: "OFF"
     }
 
-    fun getHistory(): Flow<String?> = context.dataStore.data.map { preferences ->
-        preferences[CHAT_HISTORY]
-    }
-
     suspend fun saveGeminiApiKey(apiKey: String) {
         val encrypted = encrypt(apiKey)
         context.dataStore.edit { preferences ->
@@ -190,9 +181,4 @@ preferences ->
         }
     }
 
-    suspend fun saveHistory(historyJson: String) {
-        context.dataStore.edit { preferences ->
-            preferences[CHAT_HISTORY] = historyJson
-        }
-    }
 }
