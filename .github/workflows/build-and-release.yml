@@ -28,14 +28,27 @@ jobs:
       - name: Sign APK
         id: sign_app
         run: |
+          # Debug info
+          java -version
+          echo "Android Home: ${ANDROID_HOME}"
+          ls -l ${ANDROID_HOME}/build-tools/
+          
           # Create a temporary file for the signing key
-          echo "${{ secrets.SIGNING_KEY }}" | base64 --decode > release.jks
+          # Using printf to avoid trailing newline issues
+          printf "%s" "${{ secrets.SIGNING_KEY }}" | base64 --decode > release.jks
+          
+          # Check keystore file
+          ls -l release.jks
+          file release.jks || echo "file command not found"
           
           # Find the unsigned APK
           APK_PATH=$(find app/build/outputs/apk/release -name "*.apk" | head -n 1)
+          echo "APK Path: $APK_PATH"
           SIGNED_APK_PATH="${APK_PATH%.apk}-signed.apk"
           
           # Sign the APK using apksigner
+          # Adding --enable-native-access=ALL-UNNAMED might help with warnings,
+          # but the error is the main issue.
           ${ANDROID_HOME}/build-tools/34.0.0/apksigner sign \
             --ks release.jks \
             --ks-key-alias "${{ secrets.KEY_ALIAS }}" \
