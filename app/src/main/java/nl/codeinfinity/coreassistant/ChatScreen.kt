@@ -413,8 +413,8 @@ fun ChatScreen(
     LocalSoftwareKeyboardController.current
 
     LaunchedEffect(messages.size, loadingMessage) {
-        if (messages.isNotEmpty() || loadingMessage != null) {
-            listState.animateScrollToItem((messages.size + (if (loadingMessage != null) 1 else 0)))
+        if (listState.firstVisibleItemIndex <= 2) {
+            listState.animateScrollToItem(0)
         }
     }
 
@@ -473,13 +473,14 @@ fun ChatScreen(
                 LazyColumn(
                     state = listState,
                     modifier = Modifier.weight(1f),
+                    reverseLayout = true,
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                items(messages) { message ->
-                    MessageBubble(message, userName)
-                }
                 loadingMessage?.let {
                     item { MessageBubble(it, userName) }
+                }
+                items(messages.asReversed()) { message ->
+                    MessageBubble(message, userName)
                 }
             }
             
@@ -499,12 +500,41 @@ fun ChatScreen(
                 }
             }
 
+            val speechRecognizerLauncher = rememberLauncherForActivityResult(
+                contract = ActivityResultContracts.StartActivityForResult()
+            ) { result ->
+                if (result.resultCode == android.app.Activity.RESULT_OK) {
+                    val spokenText: String? =
+                        result.data?.getStringArrayListExtra(android.speech.RecognizerIntent.EXTRA_RESULTS)?.let { results ->
+                            if (results.isNotEmpty()) results[0] else null
+                        }
+                    if (!spokenText.isNullOrBlank()) {
+                        val messageToSend = if (inputText.isBlank()) spokenText else "$inputText $spokenText"
+                        inputText = ""
+                        viewModel.sendMessage(messageToSend)
+                    }
+                }
+            }
+
             Row(
                 modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 IconButton(onClick = { filePickerLauncher.launch("*/*") }) {
                     Icon(Icons.Default.Add, contentDescription = "Attach Files")
+                }
+                IconButton(onClick = {
+                    val intent = android.content.Intent(android.speech.RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+                        putExtra(android.speech.RecognizerIntent.EXTRA_LANGUAGE_MODEL, android.speech.RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+                        putExtra(android.speech.RecognizerIntent.EXTRA_PROMPT, "Speak now")
+                    }
+                    try {
+                        speechRecognizerLauncher.launch(intent)
+                    } catch (e: Exception) {
+                        android.widget.Toast.makeText(context, "Speech recognition not available", android.widget.Toast.LENGTH_SHORT).show()
+                    }
+                }) {
+                    Icon(Icons.Default.Mic, contentDescription = "Voice Input")
                 }
                 OutlinedTextField(
                     value = inputText,
