@@ -4,6 +4,7 @@ import android.content.Context
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.provider.OpenableColumns
+import android.speech.tts.TextToSpeech
 import android.util.Base64
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -383,6 +384,56 @@ class ChatViewModelFactory(
     }
 }
 
+class TtsManager(context: Context) {
+    private var tts: TextToSpeech? = null
+    private var isReady = false
+    private var pendingMessage: String? = null
+
+    init {
+        tts = TextToSpeech(context.applicationContext) { status ->
+            if (status == TextToSpeech.SUCCESS) {
+                tts?.language = java.util.Locale.getDefault()
+                isReady = true
+                pendingMessage?.let {
+                    speak(it)
+                    pendingMessage = null
+                }
+            } else {
+                android.util.Log.e("ChatScreen", "TextToSpeech initialization failed with status: $status")
+            }
+        }
+    }
+
+    fun speak(text: String) {
+        if (isReady) {
+            tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, null)
+        } else {
+            pendingMessage = text
+        }
+    }
+
+    fun stop() {
+        tts?.stop()
+    }
+
+    fun shutdown() {
+        tts?.shutdown()
+    }
+}
+
+@Composable
+fun rememberTextToSpeech(): TtsManager {
+    val context = LocalContext.current
+    val ttsManager = remember { TtsManager(context) }
+    DisposableEffect(ttsManager) {
+        onDispose {
+            ttsManager.stop()
+            ttsManager.shutdown()
+        }
+    }
+    return ttsManager
+}
+
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalComposeUiApi::class)
 @Composable
 fun ChatScreen(
@@ -410,6 +461,7 @@ fun ChatScreen(
     val loadingMessage = viewModel.loadingMessage
     var inputText by remember { mutableStateOf("") }
     val listState = rememberLazyListState()
+    val tts = rememberTextToSpeech()
     LocalSoftwareKeyboardController.current
 
     LaunchedEffect(messages.size, loadingMessage) {
@@ -477,10 +529,10 @@ fun ChatScreen(
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                 loadingMessage?.let {
-                    item { MessageBubble(it, userName) }
+                    item { MessageBubble(it, userName, tts) }
                 }
                 items(messages.asReversed()) { message ->
-                    MessageBubble(message, userName)
+                    MessageBubble(message, userName, tts)
                 }
             }
             
@@ -578,7 +630,7 @@ fun ChatScreen(
 }
 
 @Composable
-fun MessageBubble(message: ChatMessage, userName: String) {
+fun MessageBubble(message: ChatMessage, userName: String, tts: TtsManager) {
     val alignment = if (message.isUser) Alignment.End else Alignment.Start
     val containerColor = if (message.isUser) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.secondaryContainer
     val context = LocalContext.current
@@ -595,6 +647,20 @@ fun MessageBubble(message: ChatMessage, userName: String) {
                 color = MaterialTheme.colorScheme.secondary
             )
             if (!message.isLoading && message.text.isNotBlank()) {
+                Spacer(modifier = Modifier.width(4.dp))
+                IconButton(
+                    onClick = { 
+                        tts.speak(message.text)
+                    },
+                    modifier = Modifier.size(16.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.PlayArrow,
+                        contentDescription = "Play Audio",
+                        modifier = Modifier.size(14.dp),
+                        tint = MaterialTheme.colorScheme.secondary
+                    )
+                }
                 Spacer(modifier = Modifier.width(4.dp))
                 IconButton(
                     onClick = { 
