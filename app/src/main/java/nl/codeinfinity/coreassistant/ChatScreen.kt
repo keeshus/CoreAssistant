@@ -70,7 +70,8 @@ class ChatViewModel(
     private val conversationId: Long,
     private val chatDao: ChatDao,
     private val settingsManager: SettingsManager,
-    private val context: Context
+    private val context: Context,
+    private val systemInstruction: String? = null
 ) : ViewModel() {
     val messages: StateFlow<List<ChatMessage>> = chatDao.getMessagesForConversation(conversationId)
         .map { entities ->
@@ -204,16 +205,16 @@ class ChatViewModel(
             
             // Update conversation timestamp and title if it was "New Chat"
             val currentMessages = messages.value
-            if (currentMessages.size <= 1) { // 1 because we just inserted user message
-                val title = if (userText.length > 30) userText.take(27) + "..." else userText
-                withContext(Dispatchers.IO) {
-                    chatDao.updateConversation(Conversation(id = conversationId, title = title, lastModified = System.currentTimeMillis()))
-                }
-            } else {
-                val conv = withContext(Dispatchers.IO) {
-                    chatDao.getAllConversationsSync().find { it.id == conversationId }
-                }
-                conv?.let {
+            val conv = withContext(Dispatchers.IO) {
+                chatDao.getAllConversationsSync().find { it.id == conversationId }
+            }
+            conv?.let {
+                if (!it.isVoiceAssistant && currentMessages.size <= 1) {
+                    val title = if (userText.length > 30) userText.take(27) + "..." else userText
+                    withContext(Dispatchers.IO) {
+                        chatDao.updateConversation(it.copy(title = title, lastModified = System.currentTimeMillis()))
+                    }
+                } else {
                     withContext(Dispatchers.IO) {
                         chatDao.updateConversation(it.copy(lastModified = System.currentTimeMillis()))
                     }
@@ -305,7 +306,12 @@ class ChatViewModel(
                     null
                 }
                 
-                val request = GenerateContentRequest(contents = contents, tools = tools, generationConfig = configuration)
+                val request = GenerateContentRequest(
+                    contents = contents,
+                    tools = tools,
+                    generationConfig = configuration,
+                    systemInstruction = systemInstruction?.let { Content(parts = listOf(GeminiPart(text = it))) }
+                )
                 val response = apiService.generateContent(model = modelName, apiKey = apiKey, request = request)
 
                 val responseText = response.text
@@ -373,18 +379,19 @@ class ChatViewModelFactory(
     private val conversationId: Long,
     private val chatDao: ChatDao,
     private val settingsManager: SettingsManager,
-    private val context: Context
+    private val context: Context,
+    private val systemInstruction: String? = null
 ) : ViewModelProvider.Factory {
     override fun <T : ViewModel> create(modelClass: Class<T>): T {
         if (modelClass.isAssignableFrom(ChatViewModel::class.java)) {
             @Suppress("UNCHECKED_CAST")
-            return ChatViewModel(conversationId, chatDao, settingsManager, context) as T
+            return ChatViewModel(conversationId, chatDao, settingsManager, context, systemInstruction) as T
         }
         throw IllegalArgumentException("Unknown ViewModel class")
     }
 }
 
-class TtsManager(context: Context) {
+class TtsManager(context: Context, private val onFinished: () -> Unit = {}) {
     private var tts: TextToSpeech? = null
     private var isReady = false
     private var pendingMessage: String? = null
@@ -393,6 +400,14 @@ class TtsManager(context: Context) {
         tts = TextToSpeech(context.applicationContext) { status ->
             if (status == TextToSpeech.SUCCESS) {
                 tts?.language = java.util.Locale.getDefault()
+                tts?.setOnUtteranceProgressListener(object : android.speech.tts.UtteranceProgressListener() {
+                    override fun onStart(utteranceId: String?) {}
+                    override fun onDone(utteranceId: String?) {
+                        onFinished()
+                    }
+                    @Deprecated("Deprecated in Java")
+                    override fun onError(utteranceId: String?) {}
+                })
                 isReady = true
                 pendingMessage?.let {
                     speak(it)
@@ -406,7 +421,9 @@ class TtsManager(context: Context) {
 
     fun speak(text: String) {
         if (isReady) {
-            tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, null)
+            val params = android.os.Bundle()
+            params.putString(TextToSpeech.Engine.KEY_PARAM_UTTERANCE_ID, "utteranceId")
+            tts?.speak(text, TextToSpeech.QUEUE_FLUSH, params, "utteranceId")
         } else {
             pendingMessage = text
         }
@@ -422,9 +439,9 @@ class TtsManager(context: Context) {
 }
 
 @Composable
-fun rememberTextToSpeech(): TtsManager {
+fun rememberTextToSpeech(onFinished: () -> Unit = {}): TtsManager {
     val context = LocalContext.current
-    val ttsManager = remember { TtsManager(context) }
+    val ttsManager = remember { TtsManager(context, onFinished) }
     DisposableEffect(ttsManager) {
         onDispose {
             ttsManager.stop()
@@ -461,8 +478,25 @@ fun ChatScreen(
     val loadingMessage = viewModel.loadingMessage
     var inputText by remember { mutableStateOf("") }
     val listState = rememberLazyListState()
+    
     val tts = rememberTextToSpeech()
     LocalSoftwareKeyboardController.current
+
+    val speechRecognizerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == android.app.Activity.RESULT_OK) {
+            val spokenText: String? =
+                result.data?.getStringArrayListExtra(android.speech.RecognizerIntent.EXTRA_RESULTS)?.let { results ->
+                    if (results.isNotEmpty()) results[0] else null
+                }
+            if (!spokenText.isNullOrBlank()) {
+                val messageToSend = if (inputText.isBlank()) spokenText else "$inputText $spokenText"
+                inputText = ""
+                viewModel.sendMessage(messageToSend)
+            }
+        }
+    }
 
     LaunchedEffect(messages.size, loadingMessage) {
         if (listState.firstVisibleItemIndex <= 2) {
@@ -548,22 +582,6 @@ fun ChatScreen(
                             attachment = attachment,
                             onRemove = { viewModel.removeAttachment(attachment) }
                         )
-                    }
-                }
-            }
-
-            val speechRecognizerLauncher = rememberLauncherForActivityResult(
-                contract = ActivityResultContracts.StartActivityForResult()
-            ) { result ->
-                if (result.resultCode == android.app.Activity.RESULT_OK) {
-                    val spokenText: String? =
-                        result.data?.getStringArrayListExtra(android.speech.RecognizerIntent.EXTRA_RESULTS)?.let { results ->
-                            if (results.isNotEmpty()) results[0] else null
-                        }
-                    if (!spokenText.isNullOrBlank()) {
-                        val messageToSend = if (inputText.isBlank()) spokenText else "$inputText $spokenText"
-                        inputText = ""
-                        viewModel.sendMessage(messageToSend)
                     }
                 }
             }

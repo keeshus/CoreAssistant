@@ -13,9 +13,12 @@ import androidx.compose.material3.Surface
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
+import androidx.navigation.navArgument
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
@@ -25,6 +28,15 @@ import kotlinx.coroutines.withContext
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        
+        if (intent?.getBooleanExtra("open_voice_assistant", false) == true ||
+            intent?.action == android.content.Intent.ACTION_ASSIST) {
+            setShowWhenLocked(true)
+            setTurnScreenOn(true)
+            val keyguardManager = getSystemService(android.content.Context.KEYGUARD_SERVICE) as android.app.KeyguardManager
+            keyguardManager.requestDismissKeyguard(this, null)
+        }
+
         enableEdgeToEdge()
         
         val settingsManager = SettingsManager(this)
@@ -49,6 +61,7 @@ class MainActivity : ComponentActivity() {
                     var setupDetermined by remember { mutableStateOf(false) }
                     var initialNeedsSetup by remember { mutableStateOf(false) }
                     var database by remember { mutableStateOf<ChatDatabase?>(null) }
+                    var isVoiceAssistantSession by remember { mutableStateOf(false) }
                     
                     LaunchedEffect(Unit) {
                         val db = withContext(Dispatchers.IO) {
@@ -58,12 +71,17 @@ class MainActivity : ComponentActivity() {
                         val apiKey = settingsManager.geminiApiKey.first()
                         initialNeedsSetup = apiKey.isBlank()
                         
+                        if (intent?.getBooleanExtra("open_voice_assistant", false) == true ||
+                            intent?.action == android.content.Intent.ACTION_ASSIST) {
+                            isVoiceAssistantSession = true
+                        }
+                        
                         database = db
                         setupDetermined = true
                     }
 
                     if (setupDetermined && database != null) {
-                        AppNavigation(needsSetup = initialNeedsSetup, settingsManager = settingsManager, database = database!!)
+                        AppNavigation(needsSetup = initialNeedsSetup, settingsManager = settingsManager, database = database!!, isVoiceAssistant = isVoiceAssistantSession)
                     } else {
                         // Show a loading screen while initializing
                         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -89,11 +107,16 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-fun AppNavigation(needsSetup: Boolean, settingsManager: SettingsManager, database: ChatDatabase) {
+fun AppNavigation(needsSetup: Boolean, settingsManager: SettingsManager, database: ChatDatabase, isVoiceAssistant: Boolean = false) {
     val navController = rememberNavController()
+    
+    val startDest = if (needsSetup) "setup"
+                    else if (isVoiceAssistant) "voice_assistant"
+                    else "conversations"
+                    
     NavHost(
         navController = navController,
-        startDestination = if (needsSetup) "setup" else "conversations"
+        startDestination = startDest
     ) {
         composable("setup") {
             SetupScreen(
@@ -112,12 +135,23 @@ fun AppNavigation(needsSetup: Boolean, settingsManager: SettingsManager, databas
                 database = database
             )
         }
-        composable("chat/{conversationId}") { backStackEntry ->
-            val id = backStackEntry.arguments?.getString("conversationId")?.toLongOrNull() ?: -1L
+        composable(
+            "chat/{conversationId}",
+            arguments = listOf(navArgument("conversationId") { type = NavType.LongType })
+        ) { backStackEntry ->
+            val id = backStackEntry.arguments?.getLong("conversationId") ?: -1L
             ChatScreen(
                 conversationId = id,
                 onNavigateBack = { navController.popBackStack() },
                 database = database
+            )
+        }
+        composable("voice_assistant") {
+            val context = LocalContext.current
+            VoiceAssistantScreen(
+                onExit = {
+                    (context as? android.app.Activity)?.finish()
+                }
             )
         }
         composable("settings") {

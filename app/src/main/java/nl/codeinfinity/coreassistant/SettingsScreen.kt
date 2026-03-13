@@ -313,6 +313,27 @@ fun SettingsScreen(
             )
 
             HorizontalDivider()
+            Text("System Integration", style = MaterialTheme.typography.titleMedium)
+
+            val context = LocalContext.current
+            Button(
+                onClick = {
+                    try {
+                        context.startActivity(android.content.Intent(android.provider.Settings.ACTION_VOICE_INPUT_SETTINGS))
+                    } catch (e: Exception) {
+                        try {
+                            context.startActivity(android.content.Intent(android.provider.Settings.ACTION_MANAGE_DEFAULT_APPS_SETTINGS))
+                        } catch (e2: Exception) {
+                            android.widget.Toast.makeText(context, "Cannot open settings", android.widget.Toast.LENGTH_SHORT).show()
+                        }
+                    }
+                },
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text("Set as Default Voice Assistant")
+            }
+
+            HorizontalDivider()
             Text("Privacy Settings", style = MaterialTheme.typography.titleMedium)
 
             Row(

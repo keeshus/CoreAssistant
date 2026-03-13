@@ -14,6 +14,7 @@ import net.sqlcipher.database.SupportFactory
 data class Conversation(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
     val title: String,
+    val isVoiceAssistant: Boolean = false,
     val lastModified: Long = System.currentTimeMillis()
 )
 
@@ -102,8 +103,20 @@ interface ChatDao {
         return insertConversation(Conversation(title = title))
     }
     
-    @Query("DELETE FROM conversations WHERE id NOT IN (SELECT id FROM conversations ORDER BY lastModified DESC LIMIT :limit)")
+    @Query("DELETE FROM conversations WHERE id NOT IN (SELECT id FROM conversations WHERE title != 'Voice Assistant' ORDER BY lastModified DESC LIMIT :limit) AND title != 'Voice Assistant'")
     suspend fun deleteOldConversations(limit: Int)
+
+    @Query("SELECT * FROM conversations WHERE title = 'Voice Assistant' LIMIT 1")
+    suspend fun getVoiceAssistantConversation(): Conversation?
+
+    @Transaction
+    suspend fun getOrCreateVoiceAssistantConversation(): Long {
+        val existing = getVoiceAssistantConversation()
+        if (existing != null) {
+            return existing.id
+        }
+        return insertConversation(Conversation(title = "Voice Assistant"))
+    }
 }
 
 @Database(entities = [Conversation::class, MessageEntity::class], version = 3, exportSchema = false)

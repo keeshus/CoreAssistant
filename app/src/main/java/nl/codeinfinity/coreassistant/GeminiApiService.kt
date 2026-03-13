@@ -52,17 +52,18 @@ interface GeminiApiService {
 data class GenerateContentRequest(
     val contents: List<Content>,
     val tools: List<Tool>? = null,
-    val generationConfig: GenerationConfig? = null
+    @SerializedName("generation_config") val generationConfig: GenerationConfig? = null,
+    @SerializedName("system_instruction") val systemInstruction: Content? = null
 )
 
 data class GenerationConfig(
-    val includeThoughts: Boolean? = null,
-    val thinkingConfig: ThinkingConfig? = null
+    @SerializedName("include_thoughts") val includeThoughts: Boolean? = null,
+    @SerializedName("thinking_config") val thinkingConfig: ThinkingConfig? = null
 )
 
 data class ThinkingConfig(
-    val includeThoughts: Boolean? = null,
-    val thinkingLevel: String? = null
+    @SerializedName("include_thoughts") val includeThoughts: Boolean? = null,
+    @SerializedName("thinking_level") val thinkingLevel: String? = null
 )
 
 data class Content(
@@ -104,7 +105,7 @@ data class GeminiFile(
 )
 
 data class Tool(
-    val googleSearch: GoogleSearch? = null
+    @SerializedName("google_search") val googleSearch: GoogleSearch? = null
 )
 
 class GoogleSearch
