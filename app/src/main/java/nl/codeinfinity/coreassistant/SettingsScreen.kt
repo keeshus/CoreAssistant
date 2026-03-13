@@ -30,7 +30,7 @@ class SettingsViewModel(private val settingsManager: SettingsManager) : ViewMode
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "")
 
     val selectedModel: StateFlow<String> = settingsManager.geminiModel
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "models/gemini-1.5-flash")
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "models/gemini-3.0-flash-preview")
 
     val groundingEnabled: StateFlow<Boolean> = settingsManager.googleGroundingEnabled
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
@@ -111,6 +111,12 @@ class SettingsViewModel(private val settingsManager: SettingsManager) : ViewMode
             settingsManager.saveClearHistoryOnClose(enabled)
         }
     }
+
+    fun saveUserName(name: String) {
+        viewModelScope.launch {
+            settingsManager.saveUserName(name)
+        }
+    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -128,6 +134,7 @@ fun SettingsScreen(
     })
 
     val apiKeyPref by viewModel.apiKey.collectAsState()
+    val userNamePref by settingsManager.userName.collectAsState(initial = "User")
     val selectedModel by viewModel.selectedModel.collectAsState()
     val groundingEnabled by viewModel.groundingEnabled.collectAsState()
     val conversationsLimitPref by viewModel.conversationsLimit.collectAsState()
@@ -137,10 +144,14 @@ fun SettingsScreen(
     val availableModels = viewModel.availableModels
 
     var apiKey by remember { mutableStateOf("") }
+    var userName by remember { mutableStateOf("") }
     var conversationsLimit by remember { mutableStateOf("") }
 
     LaunchedEffect(apiKeyPref) {
         if (apiKey != apiKeyPref) apiKey = apiKeyPref
+    }
+    LaunchedEffect(userNamePref) {
+        if (userName != userNamePref) userName = userNamePref
     }
     LaunchedEffect(conversationsLimitPref) {
         if (conversationsLimit != conversationsLimitPref.toString()) {
@@ -174,10 +185,21 @@ fun SettingsScreen(
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
             OutlinedTextField(
+                value = userName,
+                onValueChange = {
+                    userName = it
+                    viewModel.saveUserName(it)
+                },
+                label = { Text("Your Name") },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true
+            )
+
+            OutlinedTextField(
                 value = apiKey,
-                onValueChange = { 
+                onValueChange = {
                     apiKey = it
-                    viewModel.saveApiKey(it) 
+                    viewModel.saveApiKey(it)
                 },
                 label = { Text("Gemini API Key") },
                 modifier = Modifier.fillMaxWidth(),

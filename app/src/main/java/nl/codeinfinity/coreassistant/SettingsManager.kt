@@ -127,9 +127,8 @@ class SettingsManager(private val context: Context) {
         preferences[USER_NAME] ?: "User"
     }
 
-    val geminiModel: Flow<String> = context.dataStore.data.map {
-preferences ->
-        preferences[GEMINI_MODEL] ?: "gemini-1.5-flash"
+    val geminiModel: Flow<String> = context.dataStore.data.map { preferences ->
+        preferences[GEMINI_MODEL] ?: "gemini-3.0-flash-preview"
     }
 
     val googleGroundingEnabled: Flow<Boolean> = context.dataStore.data.map { preferences ->

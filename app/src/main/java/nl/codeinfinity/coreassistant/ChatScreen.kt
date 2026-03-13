@@ -165,10 +165,12 @@ class ChatViewModel(
                 // X-Goog-Upload-Protocol: multipart
                 
                 // Retrofit @Body with RequestBody works.
-                val response = apiService.uploadFile(apiKey = apiKey, body = multipartBody)
-                tempFile.delete()
-                
-                val remoteUri = response.file.uri
+                val remoteUri = try {
+                    val response = apiService.uploadFile(apiKey = apiKey, body = multipartBody)
+                    response.file.uri
+                } finally {
+                    tempFile.delete()
+                }
                 
                 // Update attachment in DB if possible (though we don't have messageId here yet easily)
                 // For now just return it to be used in current request.

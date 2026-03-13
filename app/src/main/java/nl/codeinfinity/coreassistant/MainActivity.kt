@@ -16,8 +16,10 @@ import androidx.compose.ui.Modifier
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 class MainActivity : ComponentActivity() {
@@ -52,11 +54,6 @@ class MainActivity : ComponentActivity() {
                         val db = withContext(Dispatchers.IO) {
                             ChatDatabase.getDatabase(this@MainActivity)
                         }
-                        if (settingsManager.clearHistoryOnClose.first()) {
-                            withContext(Dispatchers.IO) {
-                                db.clearAllTables()
-                            }
-                        }
                         
                         val apiKey = settingsManager.geminiApiKey.first()
                         initialNeedsSetup = apiKey.isBlank()
@@ -73,6 +70,18 @@ class MainActivity : ComponentActivity() {
                             CircularProgressIndicator()
                         }
                     }
+                }
+            }
+        }
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        if (isFinishing) {
+            val settingsManager = SettingsManager(this)
+            CoroutineScope(Dispatchers.IO).launch {
+                if (settingsManager.clearHistoryOnClose.first()) {
+                    ChatDatabase.getDatabase(this@MainActivity).clearAllTables()
                 }
             }
         }
