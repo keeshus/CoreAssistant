@@ -34,7 +34,16 @@ fun VoiceAssistantScreen(
     
     val triggerMic = remember { mutableStateOf(false) }
     val shouldExitAfterTts = remember { mutableStateOf(false) }
+    val initialGreetingDone = remember { mutableStateOf(false) }
 
+    // Initial Greeting
+    LaunchedEffect(Unit) {
+        val userName = settingsManager.userName.first()
+        val greeting = "Hallo $userName, waar kan ik je mee helpen?"
+        messages.add(ChatMessage(greeting, isUser = false))
+        initialGreetingDone.value = true
+    }
+    
     // Keep screen on
     val activity = context as? Activity
     DisposableEffect(Unit) {
@@ -96,8 +105,8 @@ fun VoiceAssistantScreen(
         }
     }
 
-    LaunchedEffect(Unit, triggerMic.value) {
-        if ((triggerMic.value || messages.isEmpty()) && !shouldExitAfterTts.value) {
+    LaunchedEffect(triggerMic.value, initialGreetingDone.value) {
+        if ((triggerMic.value || (messages.isEmpty() && initialGreetingDone.value)) && !shouldExitAfterTts.value) {
             triggerMic.value = false
             val intent = android.content.Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
                 putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
