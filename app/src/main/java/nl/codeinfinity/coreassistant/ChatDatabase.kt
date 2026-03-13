@@ -5,7 +5,8 @@ import androidx.room.*
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import net.sqlcipher.database.SQLiteDatabase
 import net.sqlcipher.database.SupportFactory
 
@@ -113,17 +114,20 @@ abstract class ChatDatabase : RoomDatabase() {
     companion object {
         @Volatile
         private var INSTANCE: ChatDatabase? = null
+        private val mutex = Mutex()
 
-        fun getDatabase(context: android.content.Context): ChatDatabase {
+        suspend fun getDatabase(context: android.content.Context): ChatDatabase {
             val dbName = "chat_database"
-            return INSTANCE ?: synchronized(this) {
+            INSTANCE?.let { return it }
+            
+            return mutex.withLock {
                 INSTANCE?.let { return it }
                 
                 // Initialize SQLCipher libraries
                 SQLiteDatabase.loadLibs(context.applicationContext)
                 
                 val settingsManager = SettingsManager(context.applicationContext)
-                val passphrase = runBlocking { settingsManager.getDatabasePassphrase() }
+                val passphrase = settingsManager.getDatabasePassphrase()
                 val factory = SupportFactory(passphrase.toByteArray())
 
                 val builder = Room.databaseBuilder(

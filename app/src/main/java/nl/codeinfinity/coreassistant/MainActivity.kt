@@ -5,10 +5,13 @@ import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -43,10 +46,14 @@ class MainActivity : ComponentActivity() {
                     // Use remember to only check once when the app starts
                     var setupDetermined by remember { mutableStateOf(false) }
                     var initialNeedsSetup by remember { mutableStateOf(false) }
+                    var database by remember { mutableStateOf<ChatDatabase?>(null) }
+                    
                     LaunchedEffect(Unit) {
+                        val db = withContext(Dispatchers.IO) {
+                            ChatDatabase.getDatabase(this@MainActivity)
+                        }
                         if (settingsManager.clearHistoryOnClose.first()) {
                             withContext(Dispatchers.IO) {
-                                val db = ChatDatabase.getDatabase(this@MainActivity)
                                 db.clearAllTables()
                             }
                         }
@@ -54,12 +61,17 @@ class MainActivity : ComponentActivity() {
                         val apiKey = settingsManager.geminiApiKey.first()
                         initialNeedsSetup = apiKey.isBlank()
                         
-                        
+                        database = db
                         setupDetermined = true
                     }
 
-                    if (setupDetermined) {
-                        AppNavigation(needsSetup = initialNeedsSetup, settingsManager = settingsManager)
+                    if (setupDetermined && database != null) {
+                        AppNavigation(needsSetup = initialNeedsSetup, settingsManager = settingsManager, database = database!!)
+                    } else {
+                        // Show a loading screen while initializing
+                        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                            CircularProgressIndicator()
+                        }
                     }
                 }
             }
@@ -68,7 +80,7 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-fun AppNavigation(needsSetup: Boolean, settingsManager: SettingsManager) {
+fun AppNavigation(needsSetup: Boolean, settingsManager: SettingsManager, database: ChatDatabase) {
     val navController = rememberNavController()
     NavHost(
         navController = navController,
@@ -87,14 +99,16 @@ fun AppNavigation(needsSetup: Boolean, settingsManager: SettingsManager) {
         composable("conversations") {
             ConversationListScreen(
                 onConversationClick = { id -> navController.navigate("chat/$id") },
-                onNavigateToSettings = { navController.navigate("settings") }
+                onNavigateToSettings = { navController.navigate("settings") },
+                database = database
             )
         }
         composable("chat/{conversationId}") { backStackEntry ->
             val id = backStackEntry.arguments?.getString("conversationId")?.toLongOrNull() ?: -1L
             ChatScreen(
                 conversationId = id,
-                onNavigateBack = { navController.popBackStack() }
+                onNavigateBack = { navController.popBackStack() },
+                database = database
             )
         }
         composable("settings") {

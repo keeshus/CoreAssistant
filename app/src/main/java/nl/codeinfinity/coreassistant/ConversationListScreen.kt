@@ -1,7 +1,9 @@
 package nl.codeinfinity.coreassistant
 
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
@@ -14,7 +16,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.dp
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
@@ -49,10 +50,10 @@ class ConversationListViewModel(private val chatDao: ChatDao, private val settin
 @Composable
 fun ConversationListScreen(
     onConversationClick: (Long) -> Unit,
-    onNavigateToSettings: () -> Unit
+    onNavigateToSettings: () -> Unit,
+    database: ChatDatabase
 ) {
     val context = LocalContext.current
-    val database = ChatDatabase.getDatabase(context)
     val settingsManager = SettingsManager(context)
     val viewModel: ConversationListViewModel = viewModel(factory = object : ViewModelProvider.Factory {
         @Suppress("UNCHECKED_CAST")
@@ -65,7 +66,7 @@ fun ConversationListScreen(
 
     if (conversationToDelete != null) {
         AlertDialog(
-            onDismissRequest = { conversationToDelete = null },
+            onDismissRequest = { },
             title = { Text("Delete Conversation") },
             text = { Text("Are you sure you want to delete this conversation? This action cannot be undone.") },
             confirmButton = {
@@ -77,7 +78,7 @@ fun ConversationListScreen(
                 }
             },
             dismissButton = {
-                TextButton(onClick = { conversationToDelete = null }) {
+                TextButton(onClick = { }) {
                     Text("Cancel")
                 }
             }

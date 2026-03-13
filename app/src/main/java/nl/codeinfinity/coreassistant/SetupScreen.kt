@@ -65,7 +65,9 @@ fun SetupScreen(
         if (apiKey != apiKeyPref) apiKey = apiKeyPref
     }
     LaunchedEffect(userNamePref) {
-        if (userName != userNamePref) userName = userNamePref
+        if (userNamePref != "User" && userName != userNamePref) {
+            userName = userNamePref
+        }
     }
 
     var apiKeyVisible by remember { mutableStateOf(false) }

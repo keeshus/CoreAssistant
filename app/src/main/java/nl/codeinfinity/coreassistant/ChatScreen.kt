@@ -386,6 +386,7 @@ class ChatViewModelFactory(
 fun ChatScreen(
     conversationId: Long,
     onNavigateBack: () -> Unit,
+    database: ChatDatabase,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current.applicationContext
@@ -394,7 +395,7 @@ fun ChatScreen(
         factory = remember(conversationId) {
             ChatViewModelFactory(
                 conversationId = conversationId,
-                chatDao = ChatDatabase.getDatabase(context).chatDao(),
+                chatDao = database.chatDao(),
                 settingsManager = SettingsManager(context),
                 context = context
             )
