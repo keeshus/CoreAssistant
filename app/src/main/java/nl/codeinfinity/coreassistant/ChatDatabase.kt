@@ -95,8 +95,8 @@ interface ChatDao {
     @Query("SELECT * FROM messages WHERE conversationId = :conversationId ORDER BY timestamp ASC")
     suspend fun getMessagesForConversationSync(conversationId: Long): List<MessageEntity>
 
-    @Insert
-    suspend fun insertMessage(message: MessageEntity)
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertMessage(message: MessageEntity): Long
 
     @Transaction
     suspend fun createNewConversation(title: String): Long {

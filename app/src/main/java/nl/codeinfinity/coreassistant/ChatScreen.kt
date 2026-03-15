@@ -46,6 +46,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
 import com.mikepenz.markdown.m3.Markdown
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -91,6 +92,13 @@ class ChatViewModel(
     val loadingMessage: ChatMessage? get() = _loadingMessage.value
 
     private val apiService = GeminiApiService.create()
+
+    private var currentJob: Job? = null
+    var lastUserMessage: String = ""
+        private set
+    var lastAttachments: List<Attachment> = emptyList()
+        private set
+    private var lastUserMessageId: Long? = null
 
     private val _selectedAttachments = mutableStateListOf<Attachment>()
     val selectedAttachments: List<Attachment> get() = _selectedAttachments
@@ -184,17 +192,20 @@ class ChatViewModel(
         }
     }
 
-    fun sendMessage(userText: String) {
+    fun sendMessage(userText: String, messageIdToUpdate: Long? = null) {
         if (userText.isBlank() && _selectedAttachments.isEmpty()) return
 
         val attachmentsToSend = _selectedAttachments.toList()
+        lastUserMessage = userText
+        lastAttachments = attachmentsToSend
         _selectedAttachments.clear()
 
-        viewModelScope.launch {
-            // Save user message to DB
-            withContext(Dispatchers.IO) {
+        currentJob = viewModelScope.launch {
+            // Save or update user message in DB
+            val messageId = withContext(Dispatchers.IO) {
                 chatDao.insertMessage(
                     MessageEntity(
+                        id = messageIdToUpdate ?: 0,
                         conversationId = conversationId,
                         text = userText,
                         isUser = true,
@@ -202,6 +213,7 @@ class ChatViewModel(
                     )
                 )
             }
+            lastUserMessageId = messageId
             
             // Update conversation timestamp and title if it was "New Chat"
             val currentMessages = messages.value
@@ -349,6 +361,8 @@ class ChatViewModel(
                     )
                 }
                 _loadingMessage.value = null
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                // Ignore cancellation
             } catch (e: retrofit2.HttpException) {
                 val errorBody = e.response()?.errorBody()?.string()
                 val descriptiveMessage = try {
@@ -370,9 +384,19 @@ class ChatViewModel(
                 _loadingMessage.value = ChatMessage("Network Error: Please check your connection.", isUser = false)
             } catch (e: Exception) {
                 _loadingMessage.value = ChatMessage("Error: ${e.message}", isUser = false)
+            } finally {
+                currentJob = null
             }
         }
     }
+
+    fun cancelMessage() {
+        currentJob?.cancel()
+        currentJob = null
+        _loadingMessage.value = null
+    }
+
+    fun getCancelledMessageId(): Long? = lastUserMessageId
 }
 
 class ChatViewModelFactory(
@@ -477,6 +501,7 @@ fun ChatScreen(
     val userName by settingsManager.userName.collectAsState(initial = "User")
     val loadingMessage = viewModel.loadingMessage
     var inputText by remember { mutableStateOf("") }
+    var editingMessageId by remember { mutableStateOf<Long?>(null) }
     val listState = rememberLazyListState()
     
     val tts = rememberTextToSpeech()
@@ -614,8 +639,9 @@ fun ChatScreen(
                         .onKeyEvent { keyEvent ->
                             if (keyEvent.type == KeyEventType.KeyDown && (keyEvent.key == Key.Enter || keyEvent.key == Key.NumPadEnter)) {
                                 if (inputText.isNotBlank()) {
-                                    viewModel.sendMessage(inputText)
+                                    viewModel.sendMessage(inputText, editingMessageId)
                                     inputText = ""
+                                    editingMessageId = null
                                 }
                                 true
                             } else {
@@ -627,19 +653,32 @@ fun ChatScreen(
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
                     keyboardActions = KeyboardActions(onSend = {
                         if (inputText.isNotBlank()) {
-                            viewModel.sendMessage(inputText)
+                            viewModel.sendMessage(inputText, editingMessageId)
                             inputText = ""
+                            editingMessageId = null
                         }
                     })
                 )
                 Spacer(modifier = Modifier.width(8.dp))
-                Button(onClick = {
-                    if (inputText.isNotBlank()) {
-                        viewModel.sendMessage(inputText)
-                        inputText = ""
+                if (loadingMessage != null) {
+                    Button(onClick = {
+                        editingMessageId = viewModel.getCancelledMessageId()
+                        viewModel.cancelMessage()
+                        inputText = viewModel.lastUserMessage
+                        viewModel.addAttachments(viewModel.lastAttachments)
+                    }) {
+                        Text("Cancel")
                     }
-                }) {
-                    Text("Send")
+                } else {
+                    Button(onClick = {
+                        if (inputText.isNotBlank()) {
+                            viewModel.sendMessage(inputText, editingMessageId)
+                            inputText = ""
+                            editingMessageId = null
+                        }
+                    }) {
+                        Text(if (editingMessageId != null) "Resend" else "Send")
+                    }
                 }
             }
         }
@@ -705,7 +744,7 @@ fun MessageBubble(message: ChatMessage, userName: String, tts: TtsManager) {
             Column(
                 modifier = Modifier
                     .padding(12.dp)
-                    .width(IntrinsicSize.Max)
+                    .widthIn(max = 300.dp)
             ) {
                 if (message.isLoading) {
                     CircularProgressIndicator(
