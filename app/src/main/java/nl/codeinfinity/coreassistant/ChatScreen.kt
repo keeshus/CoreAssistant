@@ -4,7 +4,9 @@ import android.content.Context
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.provider.OpenableColumns
-import android.speech.tts.TextToSpeech
+import android.media.AudioAttributes
+import android.media.AudioFormat
+import android.media.AudioTrack
 import android.util.Base64
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -416,49 +418,94 @@ class ChatViewModelFactory(
 }
 
 class TtsManager(context: Context, private val onFinished: () -> Unit = {}) {
-    private var tts: TextToSpeech? = null
+    private val sherpaManager = SherpaManager(context)
+    private var audioTrack: AudioTrack? = null
     private var isReady = false
-    private var pendingMessage: String? = null
 
     init {
-        tts = TextToSpeech(context.applicationContext) { status ->
-            if (status == TextToSpeech.SUCCESS) {
-                tts?.language = java.util.Locale.getDefault()
-                tts?.setOnUtteranceProgressListener(object : android.speech.tts.UtteranceProgressListener() {
-                    override fun onStart(utteranceId: String?) {}
-                    override fun onDone(utteranceId: String?) {
-                        onFinished()
-                    }
-                    @Deprecated("Deprecated in Java")
-                    override fun onError(utteranceId: String?) {}
-                })
-                isReady = true
-                pendingMessage?.let {
-                    speak(it)
-                    pendingMessage = null
+        // Models are now expected to be in the app's internal storage models/tts/
+        val modelsDir = File(context.getExternalFilesDir(null), "models/tts")
+        val scope = kotlinx.coroutines.CoroutineScope(Dispatchers.IO)
+        
+        scope.launch {
+            val settingsManager = SettingsManager(context)
+            val selectedVoice = settingsManager.sherpaVoice.first()
+            
+            if (selectedVoice.isNotEmpty()) {
+                val voiceDir = File(modelsDir, selectedVoice)
+                // Look for .onnx file in the voice directory
+                val modelFile = voiceDir.listFiles { file -> file.extension == "onnx" }?.firstOrNull()
+                val tokensFile = File(voiceDir, "tokens.txt")
+                val espeakDataDir = File(modelsDir, "espeak-ng-data")
+                
+                if (modelFile != null && modelFile.exists() && tokensFile.exists()) {
+                    sherpaManager.initTts(
+                        modelPath = modelFile.absolutePath,
+                        tokensPath = tokensFile.absolutePath,
+                        dataDir = espeakDataDir.absolutePath
+                    )
+                    isReady = true
                 }
-            } else {
-                android.util.Log.e("ChatScreen", "TextToSpeech initialization failed with status: $status")
             }
         }
     }
 
     fun speak(text: String) {
-        if (isReady) {
-            val params = android.os.Bundle()
-            params.putString(TextToSpeech.Engine.KEY_PARAM_UTTERANCE_ID, "utteranceId")
-            tts?.speak(text, TextToSpeech.QUEUE_FLUSH, params, "utteranceId")
-        } else {
-            pendingMessage = text
-        }
+        if (!isReady) return
+
+        val audio = sherpaManager.speak(text) ?: return
+        
+        stop()
+
+        val sampleRate = audio.sampleRate 
+        
+        val bufferSize = AudioTrack.getMinBufferSize(
+            sampleRate,
+            AudioFormat.CHANNEL_OUT_MONO,
+            AudioFormat.ENCODING_PCM_16BIT
+        )
+
+        audioTrack = AudioTrack.Builder()
+            .setAudioAttributes(
+                AudioAttributes.Builder()
+                    .setUsage(AudioAttributes.USAGE_ASSISTANCE_NAVIGATION_GUIDANCE)
+                    .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                    .build()
+            )
+            .setAudioFormat(
+                AudioFormat.Builder()
+                    .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
+                    .setSampleRate(sampleRate)
+                    .setChannelMask(AudioFormat.CHANNEL_OUT_MONO)
+                    .build()
+            )
+            .setBufferSizeInBytes(audio.samples.size * 2)
+            .setTransferMode(AudioTrack.MODE_STATIC)
+            .build()
+
+        val samples = audio.samples
+        val shortArray = ShortArray(samples.size) { (samples[it] * 32767).toInt().toShort() }
+        
+        audioTrack?.setNotificationMarkerPosition(samples.size)
+        audioTrack?.setPlaybackPositionUpdateListener(object : AudioTrack.OnPlaybackPositionUpdateListener {
+            override fun onMarkerReached(track: AudioTrack?) {
+                onFinished()
+            }
+            override fun onPeriodicNotification(track: AudioTrack?) {}
+        })
+
+        audioTrack?.write(shortArray, 0, samples.size)
+        audioTrack?.play()
     }
 
     fun stop() {
-        tts?.stop()
+        audioTrack?.stop()
+        audioTrack?.release()
+        audioTrack = null
     }
 
     fun shutdown() {
-        tts?.shutdown()
+        stop()
     }
 }
 

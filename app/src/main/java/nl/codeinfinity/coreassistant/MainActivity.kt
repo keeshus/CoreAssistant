@@ -68,6 +68,11 @@ class MainActivity : ComponentActivity() {
                             ChatDatabase.getDatabase(this@MainActivity)
                         }
                         
+                        // Copy models from assets if needed
+                        withContext(Dispatchers.IO) {
+                            ModelUtils.copyModelsFromAssets(this@MainActivity)
+                        }
+                        
                         val apiKey = settingsManager.geminiApiKey.first()
                         initialNeedsSetup = apiKey.isBlank()
                         

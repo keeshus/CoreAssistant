@@ -40,6 +40,13 @@ android {
     buildFeatures {
         compose = true
     }
+
+    sourceSets {
+        getByName("main") {
+            assets.srcDirs("models")
+        }
+    }
+
     packaging {
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
@@ -103,4 +110,9 @@ dependencies {
     implementation("net.zetetic:android-database-sqlcipher:4.5.4")
     implementation("androidx.sqlite:sqlite-ktx:2.6.2")
 
+    // Sherpa-ONNX
+    implementation(files("libs/sherpa-onnx-1.12.29.aar"))
+
+    // Tar BZ2 extraction
+    implementation("org.apache.commons:commons-compress:1.28.0")
 }

@@ -1,15 +1,18 @@
 package nl.codeinfinity.coreassistant
 
+import android.content.Context
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
@@ -18,17 +21,42 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import java.io.File
 
-class SetupViewModel(private val settingsManager: SettingsManager) : ViewModel() {
+class SetupViewModel(private val settingsManager: SettingsManager, private val context: Context) : ViewModel() {
     val apiKey: StateFlow<String> = settingsManager.geminiApiKey
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "")
 
     val userName: StateFlow<String> = settingsManager.userName
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "")
+
+    val sherpaLanguage: StateFlow<String> = settingsManager.sherpaLanguage
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "en-US")
+
+    val sherpaVoice: StateFlow<String> = settingsManager.sherpaVoice
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "")
+
+    private val _availableTtsModels = MutableStateFlow<List<String>>(emptyList())
+    val availableTtsModels = _availableTtsModels.asStateFlow()
+
+    init {
+        loadAvailableTtsModels()
+    }
+
+    private fun loadAvailableTtsModels() {
+        viewModelScope.launch {
+            val modelsDir = File(context.getExternalFilesDir(null), "models/tts")
+            val models = modelsDir.listFiles { file -> file.isDirectory && file.name != "espeak-ng-data" }
+                ?.map { it.name } ?: emptyList()
+            _availableTtsModels.value = models
+        }
+    }
 
     fun saveApiKey(key: String) {
         viewModelScope.launch {
@@ -41,6 +69,13 @@ class SetupViewModel(private val settingsManager: SettingsManager) : ViewModel()
             settingsManager.saveUserName(name)
         }
     }
+
+    fun saveSherpaSettings(language: String, voice: String) {
+        viewModelScope.launch {
+            settingsManager.saveSherpaLanguage(language)
+            settingsManager.saveSherpaVoice(voice)
+        }
+    }
 }
 
 @Composable
@@ -48,18 +83,24 @@ fun SetupScreen(
     onSetupComplete: () -> Unit,
     settingsManager: SettingsManager
 ) {
+    val context = LocalContext.current
     val viewModel: SetupViewModel = viewModel(factory = object : androidx.lifecycle.ViewModelProvider.Factory {
         @Suppress("UNCHECKED_CAST")
         override fun <T : ViewModel> create(modelClass: Class<T>): T {
-            return SetupViewModel(settingsManager) as T
+            return SetupViewModel(settingsManager, context) as T
         }
     })
 
     val apiKeyPref by viewModel.apiKey.collectAsState()
     val userNamePref by viewModel.userName.collectAsState()
+    val sherpaLanguagePref by viewModel.sherpaLanguage.collectAsState()
+    val sherpaVoicePref by viewModel.sherpaVoice.collectAsState()
+    val availableTtsModels by viewModel.availableTtsModels.collectAsState()
 
     var apiKey by remember { mutableStateOf("") }
     var userName by remember { mutableStateOf("") }
+    var selectedLanguage by remember { mutableStateOf("en-US") }
+    var selectedVoice by remember { mutableStateOf("") }
 
     LaunchedEffect(apiKeyPref) {
         if (apiKey != apiKeyPref) apiKey = apiKeyPref
@@ -69,8 +110,21 @@ fun SetupScreen(
             userName = userNamePref
         }
     }
+    LaunchedEffect(sherpaLanguagePref) {
+        selectedLanguage = sherpaLanguagePref
+    }
+    LaunchedEffect(sherpaVoicePref) {
+        if (sherpaVoicePref.isNotEmpty()) selectedVoice = sherpaVoicePref
+    }
+    LaunchedEffect(availableTtsModels) {
+        if (selectedVoice.isEmpty() && availableTtsModels.isNotEmpty()) {
+            selectedVoice = availableTtsModels.first()
+        }
+    }
 
     var apiKeyVisible by remember { mutableStateOf(false) }
+    var langMenuExpanded by remember { mutableStateOf(false) }
+    var voiceMenuExpanded by remember { mutableStateOf(false) }
 
     Column(
         modifier = Modifier
@@ -80,8 +134,9 @@ fun SetupScreen(
             .verticalScroll(rememberScrollState())
             .padding(24.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center
+        verticalArrangement = Arrangement.Top
     ) {
+        Spacer(modifier = Modifier.height(48.dp))
         Text(
             text = "Welcome to Core Assistant",
             style = MaterialTheme.typography.headlineMedium,
@@ -132,6 +187,82 @@ fun SetupScreen(
             }
         )
         
+        Spacer(modifier = Modifier.height(16.dp))
+
+        Text(
+            text = "Voice Assistant Settings",
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.SemiBold,
+            modifier = Modifier.fillMaxWidth(),
+            textAlign = TextAlign.Start
+        )
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        Box(modifier = Modifier.fillMaxWidth()) {
+            OutlinedTextField(
+                value = selectedLanguage,
+                onValueChange = {},
+                label = { Text("Language") },
+                readOnly = true,
+                modifier = Modifier.fillMaxWidth(),
+                trailingIcon = {
+                    IconButton(onClick = { langMenuExpanded = true }) {
+                        Icon(Icons.Default.ArrowDropDown, contentDescription = "Select Language")
+                    }
+                }
+            )
+            DropdownMenu(
+                expanded = langMenuExpanded,
+                onDismissRequest = { langMenuExpanded = false },
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                listOf("en-US", "nl-NL", "de-DE", "fr-FR", "es-ES", "it-IT").forEach { lang ->
+                    DropdownMenuItem(
+                        text = { Text(lang) },
+                        onClick = {
+                            selectedLanguage = lang
+                            langMenuExpanded = false
+                        }
+                    )
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        Box(modifier = Modifier.fillMaxWidth()) {
+            OutlinedTextField(
+                value = selectedVoice,
+                onValueChange = {},
+                label = { Text("Voice Model") },
+                readOnly = true,
+                modifier = Modifier.fillMaxWidth(),
+                trailingIcon = {
+                    IconButton(onClick = { voiceMenuExpanded = true }) {
+                        Icon(Icons.Default.ArrowDropDown, contentDescription = "Select Voice Model")
+                    }
+                }
+            )
+            DropdownMenu(
+                expanded = voiceMenuExpanded,
+                onDismissRequest = { voiceMenuExpanded = false },
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                availableTtsModels.forEach { model ->
+                    DropdownMenuItem(
+                        text = { Text(model) },
+                        onClick = {
+                            selectedVoice = model
+                            voiceMenuExpanded = false
+                        }
+                    )
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(24.dp))
+
         Spacer(modifier = Modifier.height(32.dp))
         
         Button(
@@ -140,6 +271,7 @@ fun SetupScreen(
                     val finalUserName = if (userName.isBlank()) "User" else userName
                     viewModel.saveUserName(finalUserName)
                     viewModel.saveApiKey(apiKey)
+                    viewModel.saveSherpaSettings(selectedLanguage, selectedVoice)
                     onSetupComplete()
                 }
             },
