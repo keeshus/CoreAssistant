@@ -54,15 +54,15 @@ android {
 
 configurations.all {
     resolutionStrategy {
-        force("org.jetbrains.kotlin:kotlin-stdlib:2.3.10")
-        force("org.jetbrains.kotlin:kotlin-stdlib-jdk7:2.3.10")
-        force("org.jetbrains.kotlin:kotlin-stdlib-jdk8:2.3.10")
-        force("org.jetbrains.kotlin:kotlin-reflect:2.3.10")
+        force("org.jetbrains.kotlin:kotlin-stdlib:2.3.20")
+        force("org.jetbrains.kotlin:kotlin-stdlib-jdk7:2.3.20")
+        force("org.jetbrains.kotlin:kotlin-stdlib-jdk8:2.3.20")
+        force("org.jetbrains.kotlin:kotlin-reflect:2.3.20")
     }
 }
 
 dependencies {
-    implementation(platform("org.jetbrains.kotlin:kotlin-bom:2.3.10"))
+    implementation(platform("org.jetbrains.kotlin:kotlin-bom:2.3.20"))
     implementation("androidx.core:core-ktx:1.18.0")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.10.0")
     implementation("androidx.activity:activity-compose:1.13.0")
