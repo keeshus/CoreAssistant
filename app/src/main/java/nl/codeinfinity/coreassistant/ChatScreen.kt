@@ -1,4 +1,5 @@
 package nl.codeinfinity.coreassistant
+import androidx.compose.ui.draw.scale
 
 import android.content.Context
 import android.net.ConnectivityManager
@@ -421,16 +422,36 @@ class TtsManager(context: Context, private val onFinished: () -> Unit = {}) {
     private val sherpaManager = SherpaManager(context)
     private var audioTrack: AudioTrack? = null
     private var isReady = false
+    private var initFailed = false
 
     init {
         // Models are now expected to be in the app's internal storage models/tts/
         val modelsDir = File(context.getExternalFilesDir(null), "models/tts")
+        val rootModelsDir = File(context.getExternalFilesDir(null), "models")
         val scope = kotlinx.coroutines.CoroutineScope(Dispatchers.IO)
         
         scope.launch {
             val settingsManager = SettingsManager(context)
             val selectedVoice = settingsManager.sherpaVoice.first()
             
+            // Preload STT (Whisper) model in the background so it's ready for Voice Input
+            val sttDir = File(rootModelsDir, "stt")
+            val encoderPath = File(sttDir, "small-encoder.int8.onnx").absolutePath
+            val decoderPath = File(sttDir, "small-decoder.int8.onnx").absolutePath
+            val tokensPath = File(sttDir, "small-tokens.txt").absolutePath
+            
+            if (File(encoderPath).exists()) {
+                val languagePref = settingsManager.sherpaLanguage.first()
+                val whisperLang = languagePref.split("-").first().lowercase()
+                sherpaManager.initStt(encoderPath, decoderPath, tokensPath, whisperLang)
+                
+                // Also preload VAD
+                val vadModelPath = File(rootModelsDir, "vad/silero_vad.onnx").absolutePath
+                if (File(vadModelPath).exists()) {
+                    sherpaManager.initVad(vadModelPath)
+                }
+            }
+
             if (selectedVoice.isNotEmpty()) {
                 val voiceDir = File(modelsDir, selectedVoice)
                 // Look for .onnx file in the voice directory
@@ -445,15 +466,59 @@ class TtsManager(context: Context, private val onFinished: () -> Unit = {}) {
                         dataDir = espeakDataDir.absolutePath
                     )
                     isReady = true
+                    pendingText?.let {
+                        val textToSpeak = it
+                        pendingText = null
+                        speak(textToSpeak)
+                    }
+                } else {
+                    initFailed = true
+                    onFinished()
                 }
+            } else {
+                initFailed = true
+                onFinished()
             }
         }
     }
 
-    fun speak(text: String) {
-        if (!isReady) return
+    private var pendingText: String? = null
+    
+    private fun cleanTextForSpeech(text: String): String {
+        return text
+            // Remove markdown bold/italic asterisks and underscores
+            .replace(Regex("(?<!\\\\)[*_]"), "")
+            // Remove markdown headers
+            .replace(Regex("(?m)^#+\\s*"), "")
+            // Remove inline code ticks
+            .replace("`", "")
+            // Replace markdown links with just the text [Text](url) -> Text
+            .replace(Regex("\\[([^]]+)]\\([^)]+\\)"), "$1")
+            // Remove URLs that are standing alone
+            .replace(Regex("https?://\\S+"), "link")
+            // Clean up extra spaces
+            .replace(Regex("\\s+"), " ")
+            .trim()
+    }
 
-        val audio = sherpaManager.speak(text) ?: return
+    fun speak(text: String) {
+        val cleanText = cleanTextForSpeech(text)
+        
+        if (initFailed) {
+            onFinished()
+            return
+        }
+        
+        if (!isReady) {
+            pendingText = cleanText
+            return
+        }
+
+        val audio = sherpaManager.speak(cleanText)
+        if (audio == null) {
+            onFinished()
+            return
+        }
         
         stop()
 
@@ -554,18 +619,74 @@ fun ChatScreen(
     val tts = rememberTextToSpeech()
     LocalSoftwareKeyboardController.current
 
-    val speechRecognizerLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.StartActivityForResult()
-    ) { result ->
-        if (result.resultCode == android.app.Activity.RESULT_OK) {
-            val spokenText: String? =
-                result.data?.getStringArrayListExtra(android.speech.RecognizerIntent.EXTRA_RESULTS)?.let { results ->
-                    if (results.isNotEmpty()) results[0] else null
+    val sherpaManager = remember { SherpaManager(context) }
+    var isListening by remember { mutableStateOf(false) }
+    var currentVolume by remember { mutableStateOf(0f) }
+    
+    var hasMicPermission by remember {
+        mutableStateOf(
+            androidx.core.content.ContextCompat.checkSelfPermission(
+                context,
+                android.Manifest.permission.RECORD_AUDIO
+            ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+        )
+    }
+
+    val micPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        hasMicPermission = granted
+        if (granted) {
+            isListening = true
+        } else {
+            android.widget.Toast.makeText(context, "Microphone permission required", android.widget.Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    LaunchedEffect(isListening) {
+        if (isListening) {
+            kotlinx.coroutines.withContext(Dispatchers.IO) {
+                try {
+                    val sampleRate = 16000
+                    val bufferSize = android.media.AudioRecord.getMinBufferSize(sampleRate, android.media.AudioFormat.CHANNEL_IN_MONO, android.media.AudioFormat.ENCODING_PCM_16BIT)
+                    val audioRecord = android.media.AudioRecord(android.media.MediaRecorder.AudioSource.MIC, sampleRate, android.media.AudioFormat.CHANNEL_IN_MONO, android.media.AudioFormat.ENCODING_PCM_16BIT, bufferSize)
+                    
+                    sherpaManager.resetVad()
+                    audioRecord.startRecording()
+                    val buffer = ShortArray(bufferSize)
+                    
+                    while (isListening) {
+                        val read = audioRecord.read(buffer, 0, bufferSize)
+                        if (read > 0) {
+                            var sumSq = 0f
+                            val floats = FloatArray(read) {
+                                val floatVal = buffer[it] / 32767.0f
+                                sumSq += floatVal * floatVal
+                                floatVal
+                            }
+                            
+                            val rms = kotlin.math.sqrt(sumSq / read).toFloat()
+                            currentVolume = rms
+                            
+                            val transcription = sherpaManager.processAudioAndTranscribe(floats)
+                            if (!transcription.isNullOrEmpty()) {
+                                kotlinx.coroutines.withContext(Dispatchers.Main) {
+                                    isListening = false
+                                    val messageToSend = if (inputText.isBlank()) transcription else "$inputText $transcription"
+                                    inputText = ""
+                                    viewModel.sendMessage(messageToSend)
+                                }
+                            }
+                        }
+                    }
+                    audioRecord.stop()
+                    audioRecord.release()
+                } catch (e: Exception) {
+                    kotlinx.coroutines.withContext(Dispatchers.Main) {
+                        isListening = false
+                        android.widget.Toast.makeText(context, "Microphone error: ${e.message}", android.widget.Toast.LENGTH_SHORT).show()
+                    }
                 }
-            if (!spokenText.isNullOrBlank()) {
-                val messageToSend = if (inputText.isBlank()) spokenText else "$inputText $spokenText"
-                inputText = ""
-                viewModel.sendMessage(messageToSend)
             }
         }
     }
@@ -602,6 +723,7 @@ fun ChatScreen(
         viewModel.addAttachments(attachments)
     }
 
+    Box(modifier = Modifier.fillMaxSize()) {
     Scaffold(
         topBar = {
             TopAppBar(
@@ -666,17 +788,21 @@ fun ChatScreen(
                     Icon(Icons.Default.Add, contentDescription = "Attach Files")
                 }
                 IconButton(onClick = {
-                    val intent = android.content.Intent(android.speech.RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
-                        putExtra(android.speech.RecognizerIntent.EXTRA_LANGUAGE_MODEL, android.speech.RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-                        putExtra(android.speech.RecognizerIntent.EXTRA_PROMPT, "Speak now")
-                    }
-                    try {
-                        speechRecognizerLauncher.launch(intent)
-                    } catch (e: Exception) {
-                        android.widget.Toast.makeText(context, "Speech recognition not available", android.widget.Toast.LENGTH_SHORT).show()
+                    if (isListening) {
+                        isListening = false // Allow toggling off
+                    } else {
+                        if (hasMicPermission) {
+                            isListening = true
+                        } else {
+                            micPermissionLauncher.launch(android.Manifest.permission.RECORD_AUDIO)
+                        }
                     }
                 }) {
-                    Icon(Icons.Default.Mic, contentDescription = "Voice Input")
+                    Icon(
+                        imageVector = Icons.Default.Mic,
+                        contentDescription = "Voice Input",
+                        tint = if (isListening) MaterialTheme.colorScheme.primary else LocalContentColor.current
+                    )
                 }
                 OutlinedTextField(
                     value = inputText,
@@ -729,7 +855,11 @@ fun ChatScreen(
                 }
             }
         }
-    }
+    } // End of Scaffold
+    
+    // Microphone overlay
+    AnimatedMicOverlay(isListening = isListening, currentVolume = currentVolume)
+} // End of Box
 }
 }
 
@@ -739,6 +869,7 @@ fun MessageBubble(message: ChatMessage, userName: String, tts: TtsManager) {
     val containerColor = if (message.isUser) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.secondaryContainer
     val context = LocalContext.current
     val clipboardManager = LocalClipboardManager.current
+    val screenWidth = androidx.compose.ui.platform.LocalConfiguration.current.screenWidthDp.dp
 
     Column(modifier = Modifier.fillMaxWidth(), horizontalAlignment = alignment) {
         Row(
@@ -791,7 +922,7 @@ fun MessageBubble(message: ChatMessage, userName: String, tts: TtsManager) {
             Column(
                 modifier = Modifier
                     .padding(12.dp)
-                    .widthIn(max = 300.dp)
+                    .widthIn(max = screenWidth * 0.85f)
             ) {
                 if (message.isLoading) {
                     CircularProgressIndicator(

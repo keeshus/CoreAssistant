@@ -7,9 +7,12 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
 class SherpaManager(private val context: Context) {
-    private var tts: OfflineTts? = null
-    private var stt: OfflineRecognizer? = null
-    private var vad: Vad? = null
+    
+    companion object {
+        @Volatile private var tts: OfflineTts? = null
+        @Volatile private var stt: OfflineRecognizer? = null
+        @Volatile private var vad: Vad? = null
+    }
 
     fun isTtsReady(): Boolean {
         return tts != null
@@ -20,6 +23,7 @@ class SherpaManager(private val context: Context) {
     }
 
     suspend fun initTts(modelPath: String, tokensPath: String, dataDir: String) = withContext(Dispatchers.IO) {
+        if (tts != null) return@withContext
         try {
             val config = OfflineTtsConfig(
                 model = OfflineTtsModelConfig(
@@ -38,6 +42,7 @@ class SherpaManager(private val context: Context) {
     }
 
     suspend fun initStt(encoderPath: String, decoderPath: String, tokensPath: String, language: String) = withContext(Dispatchers.IO) {
+        if (stt != null) return@withContext
         try {
             val config = OfflineRecognizerConfig(
                 modelConfig = OfflineModelConfig(
@@ -57,6 +62,7 @@ class SherpaManager(private val context: Context) {
     }
 
     fun initVad(modelPath: String) {
+        if (vad != null) return
         try {
             val config = VadModelConfig(
                 sileroVadModelConfig = SileroVadModelConfig(
@@ -95,24 +101,30 @@ class SherpaManager(private val context: Context) {
         return text
     }
 
-    fun processAudioAndTranscribe(samples: FloatArray): String? {
-        if (vad == null || stt == null) {
-            Log.e("SherpaManager", "VAD or STT is null! Cannot process audio.")
+    suspend fun processAudioAndTranscribe(samples: FloatArray): String? {
+        if (vad == null) {
+            Log.e("SherpaManager", "VAD is null! Cannot process audio.")
             return null
         }
         vad?.acceptWaveform(samples)
         return getTranscribedText()
     }
 
-    fun flushAndTranscribe(): String? {
+    suspend fun flushAndTranscribe(): String? {
         vad?.flush()
         return getTranscribedText()
     }
 
-    private fun getTranscribedText(): String? {
+    private suspend fun getTranscribedText(): String? {
         var fullText = ""
         while (vad?.empty() == false) {
             val segment = vad?.front() ?: break
+            
+            // Wait for STT to be loaded
+            while (stt == null) {
+                kotlinx.coroutines.delay(100)
+            }
+            
             val text = transcribe(segment.samples)
             if (text.isNotBlank()) {
                 fullText += "$text "

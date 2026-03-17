@@ -1,4 +1,5 @@
 package nl.codeinfinity.coreassistant
+import androidx.compose.ui.draw.scale
 
 import android.app.Activity
 import android.media.AudioFormat
@@ -13,6 +14,8 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Mic
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.Dispatchers
@@ -37,6 +40,7 @@ fun VoiceAssistantScreen(
     var loadingMessage by remember { mutableStateOf<ChatMessage?>(null) }
     
     var isListening by remember { mutableStateOf(false) }
+    var currentVolume by remember { mutableStateOf(0f) }
     val shouldExitAfterTts = remember { mutableStateOf(false) }
     val initialGreetingDone = remember { mutableStateOf(false) }
 
@@ -48,7 +52,6 @@ fun VoiceAssistantScreen(
         val whisperLang = languagePref.split("-").first().lowercase()
         val greeting = "Hallo $userName, waar kan ik je mee helpen?"
         messages.add(ChatMessage(greeting, isUser = false))
-        initialGreetingDone.value = true
         
         // Initialize Sherpa if models exist
         val modelsDir = File(context.getExternalFilesDir(null), "models")
@@ -63,14 +66,22 @@ fun VoiceAssistantScreen(
         val vadPath = File(modelsDir, "vad/silero_vad.onnx").absolutePath
         
         android.util.Log.d("VoiceAssistantScreen", "modelsDir exists. encoderPath exists: ${File(encoderPath).exists()}, vadPath exists: ${File(vadPath).exists()}")
+        
+        // Init VAD immediately on the IO thread so it can listen as a stream right away
+        withContext(Dispatchers.IO) {
+            if (File(vadPath).exists()) {
+                sherpaManager.initVad(vadPath)
+            } else {
+                android.util.Log.e("VoiceAssistantScreen", "VAD model not found at $vadPath. Speech recognition will fail because it depends on VAD.")
+            }
+        }
+        
+        initialGreetingDone.value = true
+        
+        // Load the larger Whisper STT model in the background while VAD is ready to listen
         if (File(encoderPath).exists()) {
-            withContext(Dispatchers.IO) {
+            scope.launch(Dispatchers.IO) {
                 sherpaManager.initStt(encoderPath, decoderPath, tokensPath, whisperLang)
-                if (File(vadPath).exists()) {
-                    sherpaManager.initVad(vadPath)
-                } else {
-                    android.util.Log.e("VoiceAssistantScreen", "VAD model not found at $vadPath. Speech recognition will fail because it depends on VAD.")
-                }
             }
         } else {
             android.util.Log.e("VoiceAssistantScreen", "Encoder model not found at $encoderPath")
@@ -86,11 +97,39 @@ fun VoiceAssistantScreen(
         }
     }
 
+    var hasMicPermission by remember {
+        mutableStateOf(
+            androidx.core.content.ContextCompat.checkSelfPermission(
+                context,
+                android.Manifest.permission.RECORD_AUDIO
+            ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+        )
+    }
+
+    val micPermissionLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
+        contract = androidx.activity.result.contract.ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        hasMicPermission = granted
+        if (granted) {
+            isListening = true
+        } else {
+            android.widget.Toast.makeText(context, "Microphone permission required", android.widget.Toast.LENGTH_SHORT).show()
+        }
+    }
+
     val tts = rememberTextToSpeech {
         if (shouldExitAfterTts.value) {
             onExit()
         } else {
-            isListening = true
+            if (hasMicPermission) {
+                // Add a small delay to avoid capturing the end-of-speech "pop" or room reverberation from the speaker
+                scope.launch {
+                    kotlinx.coroutines.delay(300)
+                    isListening = true
+                }
+            } else {
+                micPermissionLauncher.launch(android.Manifest.permission.RECORD_AUDIO)
+            }
         }
     }
 
@@ -100,7 +139,7 @@ fun VoiceAssistantScreen(
             withContext(Dispatchers.IO) {
                 val sampleRate = 16000
                 val bufferSize = AudioRecord.getMinBufferSize(sampleRate, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT)
-                val audioRecord = AudioRecord(MediaRecorder.AudioSource.MIC, sampleRate, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT, bufferSize)
+                val audioRecord = AudioRecord(MediaRecorder.AudioSource.VOICE_RECOGNITION, sampleRate, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT, bufferSize)
                 
                 sherpaManager.resetVad()
                 audioRecord.startRecording()
@@ -109,13 +148,23 @@ fun VoiceAssistantScreen(
                 while (isListening) {
                     val read = audioRecord.read(buffer, 0, bufferSize)
                     if (read > 0) {
-                        val floats = FloatArray(read) { buffer[it] / 32767.0f }
+                        var sumSq = 0f
+                        val floats = FloatArray(read) {
+                            val floatVal = buffer[it] / 32767.0f
+                            sumSq += floatVal * floatVal
+                            floatVal
+                        }
+                        
+                        val rms = kotlin.math.sqrt(sumSq / read).toFloat()
+                        currentVolume = rms
                         
                         val transcription = sherpaManager.processAudioAndTranscribe(floats)
                         if (!transcription.isNullOrEmpty()) {
                             withContext(Dispatchers.Main) {
                                 isListening = false
-                                handleSpokenText(transcription, settingsManager, apiService, messages, scope, tts, shouldExitAfterTts, onExit, { loadingMessage = it })
+                                scope.launch {
+                                    handleSpokenText(transcription, settingsManager, apiService, messages, scope, tts, shouldExitAfterTts, onExit, { loadingMessage = it })
+                                }
                             }
                         }
                     }
@@ -134,26 +183,36 @@ fun VoiceAssistantScreen(
         }
     }
 
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(16.dp),
-        horizontalAlignment = Alignment.CenterHorizontally
-    ) {
-        val listState = rememberLazyListState()
-        
-        LazyColumn(
-            state = listState,
-            modifier = Modifier.weight(1f),
-            reverseLayout = false
+    Box(modifier = Modifier.fillMaxSize().systemBarsPadding()) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(16.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            items(messages) { msg ->
-                MessageBubble(msg, "User", tts)
+            val listState = rememberLazyListState()
+            
+            LaunchedEffect(messages.size, loadingMessage) {
+                if (listState.firstVisibleItemIndex <= 2) {
+                    listState.animateScrollToItem(0)
+                }
             }
-            loadingMessage?.let {
-                item { MessageBubble(it, "User", tts) }
+
+            val currentUserName by settingsManager.userName.collectAsState(initial = "User")
+
+            LazyColumn(
+                state = listState,
+                modifier = Modifier.weight(1f),
+                reverseLayout = true,
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                loadingMessage?.let {
+                    item { MessageBubble(it, currentUserName, tts) }
+                }
+                items(messages.asReversed()) { msg ->
+                    MessageBubble(msg, currentUserName, tts)
+                }
             }
-        }
         
         Spacer(modifier = Modifier.height(16.dp))
         
@@ -168,7 +227,11 @@ fun VoiceAssistantScreen(
         Button(onClick = onExit) {
             Text("Close Assistant")
         }
-    }
+        } // close Column
+        
+        // Microphone overlay
+        AnimatedMicOverlay(isListening = isListening, currentVolume = currentVolume)
+    } // close Box
 }
 
 private suspend fun handleSpokenText(
@@ -204,13 +267,14 @@ private suspend fun handleSpokenText(
             )
             val response = apiService.generateContent(model = modelName, apiKey = apiKey, request = request)
             setLoading(null)
-            val aiText = response.text ?: "I'm sorry, I couldn't process that."
-            messages.add(ChatMessage(aiText, isUser = false))
+            val rawAiText = response.text ?: "I'm sorry, I couldn't process that."
+            val cleanAiText = rawAiText.replace("[[FINISH]]", "").trim()
+            messages.add(ChatMessage(cleanAiText, isUser = false))
             
-            if (aiText.contains("[[FINISH]]")) {
+            if (rawAiText.contains("[[FINISH]]")) {
                 shouldExitAfterTts.value = true
             }
-            tts.speak(aiText.replace("[[FINISH]]", ""))
+            tts.speak(cleanAiText)
         } catch (e: Exception) {
             setLoading(ChatMessage("Error: ${e.message}", isUser = false))
         }
