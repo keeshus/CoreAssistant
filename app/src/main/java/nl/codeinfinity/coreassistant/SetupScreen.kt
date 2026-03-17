@@ -49,9 +49,9 @@ class SetupViewModel(private val settingsManager: SettingsManager, private val c
         loadAvailableTtsModels()
     }
 
-    private fun loadAvailableTtsModels() {
+    fun loadAvailableTtsModels() {
         viewModelScope.launch {
-            val modelsDir = File(context.getExternalFilesDir(null), "models/tts")
+            val modelsDir = File(context.getExternalFilesDir(null), "downloaded_models/models/tts")
             val models = modelsDir.listFiles { file -> file.isDirectory && file.name != "espeak-ng-data" }
                 ?.map { it.name } ?: emptyList()
             _availableTtsModels.value = models
@@ -122,6 +122,12 @@ fun SetupScreen(
         }
     }
 
+    var isDownloading by remember { mutableStateOf(false) }
+    var isDownloadComplete by remember { mutableStateOf(false) }
+    var downloadProgress by remember { mutableStateOf(0f) }
+    var downloadStatus by remember { mutableStateOf("") }
+    val coroutineScope = rememberCoroutineScope()
+
     var apiKeyVisible by remember { mutableStateOf(false) }
     var langMenuExpanded by remember { mutableStateOf(false) }
     var voiceMenuExpanded by remember { mutableStateOf(false) }
@@ -154,6 +160,46 @@ fun SetupScreen(
         )
         
         Spacer(modifier = Modifier.height(32.dp))
+
+        if (isDownloading) {
+            Text(text = downloadStatus, style = MaterialTheme.typography.bodyMedium)
+            LinearProgressIndicator(progress = { downloadProgress }, modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp))
+            Spacer(modifier = Modifier.height(16.dp))
+        } else if (isDownloadComplete) {
+            Text(text = "Models Downloaded Successfully!", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.bodyMedium)
+            Spacer(modifier = Modifier.height(16.dp))
+        } else {
+            Button(
+                onClick = {
+                    coroutineScope.launch {
+                        isDownloading = true
+                        downloadProgress = 0f
+                        downloadStatus = "Downloading Models..."
+                        val modelsUrl = "https://bibocraftseu.blob.core.windows.net/settings/Models/models.tar.gz?sv=2025-07-05&spr=https&st=2026-03-17T17%3A12%3A24Z&se=2030-12-31T17%3A12%3A00Z&sr=b&sp=r&sig=u1w%2BoQV%2FqWBkR0UhbHl5GcKbw0p5%2BxvkbJYPWyEIYZc%3D"
+                        val checksumUrl = "https://bibocraftseu.blob.core.windows.net/settings/Models/models.tar.gz.sha256?sv=2025-07-05&spr=https&st=2026-03-17T20%3A15%3A46Z&se=2030-12-31T20%3A15%3A00Z&sr=b&sp=r&sig=BfbWfmntk6ZV7xOgoP8TSu7UMNSAGFtnfbgeHNFUV98%3D"
+                        val modelsSuccess = DownloadManager.downloadAndExtractModels(context, modelsUrl, checksumUrl) { progress ->
+                            downloadProgress = progress
+                        }
+
+                        if (modelsSuccess) {
+                            downloadStatus = "Download Complete!"
+                            viewModel.loadAvailableTtsModels()
+                            isDownloadComplete = true
+                        } else {
+                            downloadStatus = "Failed to download Models."
+                        }
+                        isDownloading = false
+                    }
+                },
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text("Download Required Models")
+            }
+            if (downloadStatus.isNotEmpty() && !isDownloadComplete) {
+                Text(text = downloadStatus, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+            }
+            Spacer(modifier = Modifier.height(16.dp))
+        }
 
         OutlinedTextField(
             value = userName,

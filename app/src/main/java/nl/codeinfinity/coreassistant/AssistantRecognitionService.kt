@@ -25,7 +25,7 @@ class AssistantRecognitionService : RecognitionService() {
         sherpaManager = SherpaManager(this)
         settingsManager = SettingsManager(this)
         
-        val modelsDir = File(getExternalFilesDir(null), "models")
+        val modelsDir = File(getExternalFilesDir(null), "downloaded_models/models")
         
         // STT paths (Whisper)
         val sttDir = File(modelsDir, "stt")
@@ -36,16 +36,30 @@ class AssistantRecognitionService : RecognitionService() {
         // VAD path
         val vadModelPath = File(modelsDir, "vad/silero_vad.onnx").absolutePath
         
-        if (File(encoderPath).exists()) {
-            serviceScope.launch {
+        serviceScope.launch {
+            // 1. TTS
+            val selectedVoice = settingsManager.sherpaVoice.first()
+            if (selectedVoice.isNotEmpty()) {
+                val voiceDir = File(File(modelsDir, "tts"), selectedVoice)
+                val modelFile = voiceDir.listFiles { file -> file.name.endsWith(".onnx") }?.firstOrNull()
+                val tokensFile = File(voiceDir, "tokens.txt")
+                val espeakDataDir = File(File(modelsDir, "tts"), "espeak-ng-data")
+                if (modelFile != null && modelFile.exists() && tokensFile.exists()) {
+                    sherpaManager.initTts(modelFile.absolutePath, tokensFile.absolutePath, espeakDataDir.absolutePath)
+                }
+            }
+
+            // 2. VAD
+            if (File(vadModelPath).exists()) {
+                sherpaManager.initVad(vadModelPath)
+            }
+
+            // 3. STT
+            if (File(encoderPath).exists()) {
                 val languagePref = settingsManager.sherpaLanguage.first()
                 val whisperLang = languagePref.split("-").first().lowercase()
                 sherpaManager.initStt(encoderPath, decoderPath, tokensPath, whisperLang)
             }
-        }
-        
-        if (File(vadModelPath).exists()) {
-            sherpaManager.initVad(vadModelPath)
         }
     }
 

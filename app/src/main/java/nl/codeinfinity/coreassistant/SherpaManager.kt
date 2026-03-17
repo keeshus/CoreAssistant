@@ -10,6 +10,7 @@ class SherpaManager(private val context: Context) {
     
     companion object {
         @Volatile private var tts: OfflineTts? = null
+        @Volatile private var currentTtsModelPath: String? = null
         @Volatile private var stt: OfflineRecognizer? = null
         @Volatile private var vad: Vad? = null
     }
@@ -23,8 +24,18 @@ class SherpaManager(private val context: Context) {
     }
 
     suspend fun initTts(modelPath: String, tokensPath: String, dataDir: String) = withContext(Dispatchers.IO) {
-        if (tts != null) return@withContext
+        if (tts != null && currentTtsModelPath == modelPath) return@withContext
         try {
+            // If there's an existing tts with a different model, release it if possible, then clear it
+            if (tts != null) {
+                try {
+                    tts?.release()
+                } catch (e: Exception) {
+                    // Ignore if release is not available
+                }
+                tts = null
+            }
+
             val config = OfflineTtsConfig(
                 model = OfflineTtsModelConfig(
                     vits = OfflineTtsVitsModelConfig(
@@ -35,6 +46,7 @@ class SherpaManager(private val context: Context) {
                 )
             )
             tts = OfflineTts(config = config)
+            currentTtsModelPath = modelPath
             Log.d("SherpaManager", "TTS initialized successfully")
         } catch (e: Exception) {
             Log.e("SherpaManager", "Failed to init TTS", e)

@@ -54,7 +54,7 @@ fun VoiceAssistantScreen(
         messages.add(ChatMessage(greeting, isUser = false))
         
         // Initialize Sherpa if models exist
-        val modelsDir = File(context.getExternalFilesDir(null), "models")
+        val modelsDir = File(context.getExternalFilesDir(null), "downloaded_models/models")
         
         // STT paths (Whisper)
         val sttDir = File(modelsDir, "stt")
@@ -67,24 +67,22 @@ fun VoiceAssistantScreen(
         
         android.util.Log.d("VoiceAssistantScreen", "modelsDir exists. encoderPath exists: ${File(encoderPath).exists()}, vadPath exists: ${File(vadPath).exists()}")
         
-        // Init VAD immediately on the IO thread so it can listen as a stream right away
-        withContext(Dispatchers.IO) {
+        initialGreetingDone.value = true
+        
+        // Load in order: TTS -> VAD -> STT as requested
+        scope.launch(Dispatchers.IO) {
+            // TTS is implicitly loaded by rememberTextToSpeech, but we will ensure VAD then STT
             if (File(vadPath).exists()) {
                 sherpaManager.initVad(vadPath)
             } else {
                 android.util.Log.e("VoiceAssistantScreen", "VAD model not found at $vadPath. Speech recognition will fail because it depends on VAD.")
             }
-        }
-        
-        initialGreetingDone.value = true
-        
-        // Load the larger Whisper STT model in the background while VAD is ready to listen
-        if (File(encoderPath).exists()) {
-            scope.launch(Dispatchers.IO) {
+            
+            if (File(encoderPath).exists()) {
                 sherpaManager.initStt(encoderPath, decoderPath, tokensPath, whisperLang)
+            } else {
+                android.util.Log.e("VoiceAssistantScreen", "Encoder model not found at $encoderPath")
             }
-        } else {
-            android.util.Log.e("VoiceAssistantScreen", "Encoder model not found at $encoderPath")
         }
     }
     

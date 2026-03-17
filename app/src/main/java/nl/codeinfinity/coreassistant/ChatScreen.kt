@@ -425,59 +425,59 @@ class TtsManager(context: Context, private val onFinished: () -> Unit = {}) {
     private var initFailed = false
 
     init {
-        // Models are now expected to be in the app's internal storage models/tts/
-        val modelsDir = File(context.getExternalFilesDir(null), "models/tts")
-        val rootModelsDir = File(context.getExternalFilesDir(null), "models")
+        // Models are now expected to be in the app's internal storage downloaded_models/models/tts/
+        val modelsDir = File(context.getExternalFilesDir(null), "downloaded_models/models/tts")
+        val rootModelsDir = File(context.getExternalFilesDir(null), "downloaded_models/models")
         val scope = kotlinx.coroutines.CoroutineScope(Dispatchers.IO)
         
         scope.launch {
             val settingsManager = SettingsManager(context)
-            val selectedVoice = settingsManager.sherpaVoice.first()
-            
-            // Preload STT (Whisper) model in the background so it's ready for Voice Input
-            val sttDir = File(rootModelsDir, "stt")
-            val encoderPath = File(sttDir, "small-encoder.int8.onnx").absolutePath
-            val decoderPath = File(sttDir, "small-decoder.int8.onnx").absolutePath
-            val tokensPath = File(sttDir, "small-tokens.txt").absolutePath
-            
-            if (File(encoderPath).exists()) {
-                val languagePref = settingsManager.sherpaLanguage.first()
-                val whisperLang = languagePref.split("-").first().lowercase()
-                sherpaManager.initStt(encoderPath, decoderPath, tokensPath, whisperLang)
+            settingsManager.sherpaVoice.collect { selectedVoice ->
+                // 1. First load TTS
+                if (selectedVoice.isNotEmpty()) {
+                    val voiceDir = File(modelsDir, selectedVoice)
+                    val modelFile = voiceDir.listFiles { file -> file.extension == "onnx" }?.firstOrNull()
+                    val tokensFile = File(voiceDir, "tokens.txt")
+                    val espeakDataDir = File(modelsDir, "espeak-ng-data")
+                    
+                    if (modelFile != null && modelFile.exists() && tokensFile.exists()) {
+                        sherpaManager.initTts(
+                            modelPath = modelFile.absolutePath,
+                            tokensPath = tokensFile.absolutePath,
+                            dataDir = espeakDataDir.absolutePath
+                        )
+                        isReady = true
+                        pendingText?.let {
+                            val textToSpeak = it
+                            pendingText = null
+                            speak(textToSpeak)
+                        }
+                    } else {
+                        initFailed = true
+                        onFinished()
+                    }
+                }
                 
-                // Also preload VAD
+                // 2. Load VAD
                 val vadModelPath = File(rootModelsDir, "vad/silero_vad.onnx").absolutePath
                 if (File(vadModelPath).exists()) {
                     sherpaManager.initVad(vadModelPath)
                 }
-            }
-
-            if (selectedVoice.isNotEmpty()) {
-                val voiceDir = File(modelsDir, selectedVoice)
-                // Look for .onnx file in the voice directory
-                val modelFile = voiceDir.listFiles { file -> file.extension == "onnx" }?.firstOrNull()
-                val tokensFile = File(voiceDir, "tokens.txt")
-                val espeakDataDir = File(modelsDir, "espeak-ng-data")
                 
-                if (modelFile != null && modelFile.exists() && tokensFile.exists()) {
-                    sherpaManager.initTts(
-                        modelPath = modelFile.absolutePath,
-                        tokensPath = tokensFile.absolutePath,
-                        dataDir = espeakDataDir.absolutePath
-                    )
-                    isReady = true
-                    pendingText?.let {
-                        val textToSpeak = it
-                        pendingText = null
-                        speak(textToSpeak)
-                    }
+                // 3. Load STT (Whisper)
+                val sttDir = File(rootModelsDir, "stt")
+                val encoderPath = File(sttDir, "small-encoder.int8.onnx").absolutePath
+                val decoderPath = File(sttDir, "small-decoder.int8.onnx").absolutePath
+                val tokensPath = File(sttDir, "small-tokens.txt").absolutePath
+                
+                if (File(encoderPath).exists()) {
+                    val languagePref = settingsManager.sherpaLanguage.first()
+                    val whisperLang = languagePref.split("-").first().lowercase()
+                    sherpaManager.initStt(encoderPath, decoderPath, tokensPath, whisperLang)
                 } else {
                     initFailed = true
                     onFinished()
                 }
-            } else {
-                initFailed = true
-                onFinished()
             }
         }
     }

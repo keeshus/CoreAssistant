@@ -74,7 +74,7 @@ class SettingsViewModel(private val settingsManager: SettingsManager, private va
 
     private fun loadAvailableTtsModels() {
         viewModelScope.launch {
-            val modelsDir = File(context.getExternalFilesDir(null), "models/tts")
+            val modelsDir = File(context.getExternalFilesDir(null), "downloaded_models/models/tts")
             val models = modelsDir.listFiles { file -> file.isDirectory && file.name != "espeak-ng-data" }
                 ?.map { it.name } ?: emptyList()
             _availableTtsModels.value = models
@@ -434,26 +434,6 @@ fun SettingsScreen(
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Text("Set as Default Voice Assistant")
-            }
-            
-            Button(
-                onClick = {
-                    try {
-                        // STT engines are typically configured in Input Method Settings on modern Android devices
-                        val intent = android.content.Intent(android.provider.Settings.ACTION_INPUT_METHOD_SETTINGS)
-                        systemContext.startActivity(intent)
-                    } catch (e: Exception) {
-                        try {
-                            val intent = android.content.Intent(android.provider.Settings.ACTION_SETTINGS)
-                            systemContext.startActivity(intent)
-                        } catch (e2: Exception) {
-                            android.widget.Toast.makeText(systemContext, "Cannot open settings", android.widget.Toast.LENGTH_SHORT).show()
-                        }
-                    }
-                },
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Text("Set as Default Speech-to-Text Engine")
             }
 
             HorizontalDivider()
