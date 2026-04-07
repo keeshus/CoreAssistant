@@ -99,7 +99,7 @@ dependencies {
     implementation("androidx.navigation:navigation-compose:2.9.7")
 
     // Markdown
-    implementation("com.mikepenz:multiplatform-markdown-renderer-m3:0.39.2")
+    implementation("com.mikepenz:multiplatform-markdown-renderer-m3:0.40.2")
 
     // Room DB
     implementation("androidx.room:room-runtime:2.8.4")
