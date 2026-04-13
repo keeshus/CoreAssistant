@@ -41,12 +41,6 @@ android {
         compose = true
     }
 
-    sourceSets {
-        getByName("main") {
-            assets.srcDirs("models")
-        }
-    }
-
     packaging {
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
@@ -69,14 +63,10 @@ configurations.all {
 }
 
 dependencies {
-    implementation(platform("org.jetbrains.kotlin:kotlin-bom:2.3.20"))
     implementation("androidx.core:core-ktx:1.18.0")
-    implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.10.0")
     implementation("androidx.activity:activity-compose:1.13.0")
     implementation(platform("androidx.compose:compose-bom:2026.03.01"))
     implementation("androidx.compose.ui:ui")
-    implementation("androidx.compose.ui:ui-graphics")
-    implementation("androidx.compose.ui:ui-tooling-preview")
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.material:material-icons-core")
     implementation("androidx.compose.material:material-icons-extended")
@@ -108,11 +98,4 @@ dependencies {
 
     // SQLCipher for encrypted database
     implementation("net.zetetic:android-database-sqlcipher:4.5.4")
-    implementation("androidx.sqlite:sqlite-ktx:2.6.2")
-
-    // Sherpa-ONNX
-    implementation(files("libs/sherpa-onnx-1.12.29.aar"))
-
-    // Tar BZ2 extraction
-    implementation("org.apache.commons:commons-compress:1.28.0")
 }

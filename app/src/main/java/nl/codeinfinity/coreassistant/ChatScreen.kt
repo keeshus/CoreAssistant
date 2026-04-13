@@ -1,17 +1,12 @@
 package nl.codeinfinity.coreassistant
-import androidx.compose.ui.draw.scale
 
 import android.content.Context
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.provider.OpenableColumns
-import android.media.AudioAttributes
-import android.media.AudioFormat
-import android.media.AudioTrack
 import android.util.Base64
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -24,7 +19,13 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Description
+import androidx.compose.material.icons.filled.Language
+import androidx.compose.material.icons.filled.Psychology
+import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -32,16 +33,15 @@ import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.input.key.*
-import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.LocalUriHandler
-import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
+import androidx.core.net.toUri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
@@ -59,7 +59,6 @@ import okhttp3.RequestBody.Companion.asRequestBody
 import java.io.File
 import java.io.FileOutputStream
 import nl.codeinfinity.coreassistant.Part as GeminiPart
-import androidx.core.net.toUri
 
 data class ChatMessage(
     val text: String,
@@ -105,6 +104,29 @@ class ChatViewModel(
 
     private val _selectedAttachments = mutableStateListOf<Attachment>()
     val selectedAttachments: List<Attachment> get() = _selectedAttachments
+
+    private val _draftText = MutableStateFlow("")
+    val draftText: StateFlow<String> = _draftText.asStateFlow()
+
+    init {
+        viewModelScope.launch {
+            val conv = withContext(Dispatchers.IO) {
+                chatDao.getConversationById(conversationId)
+            }
+            conv?.draftText?.let {
+                _draftText.value = it
+            }
+        }
+    }
+
+    fun updateDraft(text: String) {
+        _draftText.value = text
+        viewModelScope.launch {
+            withContext(Dispatchers.IO) {
+                chatDao.updateDraft(conversationId, text, System.currentTimeMillis())
+            }
+        }
+    }
 
     fun addAttachments(attachments: List<Attachment>) {
         _selectedAttachments.addAll(attachments)
@@ -172,12 +194,6 @@ class ChatViewModel(
                     )
                     .build()
 
-                // Actually Gemini File API (multipart) expects a specific structure if using simple POST.
-                // The documentation says:
-                // POST https://upload.googleapis.com/v1beta/files?key=$API_KEY
-                // X-Goog-Upload-Protocol: multipart
-                
-                // Retrofit @Body with RequestBody works.
                 val remoteUri = try {
                     val response = apiService.uploadFile(apiKey = apiKey, body = multipartBody)
                     response.file.uri
@@ -185,8 +201,6 @@ class ChatViewModel(
                     tempFile.delete()
                 }
                 
-                // Update attachment in DB if possible (though we don't have messageId here yet easily)
-                // For now just return it to be used in current request.
                 remoteUri
             } catch (e: Exception) {
                 android.util.Log.e("ChatViewModel", "Upload failed", e)
@@ -197,6 +211,9 @@ class ChatViewModel(
 
     fun sendMessage(userText: String, messageIdToUpdate: Long? = null) {
         if (userText.isBlank() && _selectedAttachments.isEmpty()) return
+
+        // Clear draft when sending
+        updateDraft("")
 
         val attachmentsToSend = _selectedAttachments.toList()
         lastUserMessage = userText
@@ -221,10 +238,10 @@ class ChatViewModel(
             // Update conversation timestamp and title if it was "New Chat"
             val currentMessages = messages.value
             val conv = withContext(Dispatchers.IO) {
-                chatDao.getAllConversationsSync().find { it.id == conversationId }
+                chatDao.getConversationById(conversationId)
             }
             conv?.let {
-                if (!it.isVoiceAssistant && currentMessages.size <= 1) {
+                if (currentMessages.size <= 1) {
                     val title = if (userText.length > 30) userText.take(27) + "..." else userText
                     withContext(Dispatchers.IO) {
                         chatDao.updateConversation(it.copy(title = title, lastModified = System.currentTimeMillis()))
@@ -265,24 +282,17 @@ class ChatViewModel(
                         parts.add(GeminiPart(text = msg.text))
                     }
                     
-                    // Only process attachments for the current message being sent (which is the last one in history)
-                    // or if they were already processed and stored with remoteUri.
-                    // For simplicity and to avoid re-uploading, we check if attachments exist.
                     msg.attachments?.forEach { attachment ->
                         if (index == historyEntities.lastIndex && msg.isUser) {
-                            // This is the message we just sent, we need to prepare the parts (upload if needed)
                             val part = prepareAttachmentPart(attachment, apiKey)
                             if (part != null) {
                                 parts.add(part)
-                                
-                                // If it was a File API upload, we should update the DB with the remoteUri
                                 if (part.fileData != null && attachment.remoteUri == null) {
                                     val updatedAttachment = attachment.copy(remoteUri = part.fileData.fileUri)
                                     val updatedAttachments = msg.attachments.map {
                                         if (it.uri == attachment.uri) updatedAttachment else it
                                     }
                                     withContext(Dispatchers.IO) {
-                                        // Update the message in DB. We need to find the entity first to get its ID.
                                         val history = chatDao.getMessagesForConversationSync(conversationId)
                                         val entityToUpdate = history.getOrNull(index)
                                         if (entityToUpdate != null) {
@@ -291,16 +301,11 @@ class ChatViewModel(
                                     }
                                 }
                             } else {
-                                // Failed to prepare/upload attachment
                                 throw Exception("Failed to process attachment: ${attachment.fileName}")
                             }
                         } else if (attachment.remoteUri != null) {
-                            // History message with already uploaded file
                             parts.add(GeminiPart(fileData = FileData(mimeType = attachment.mimeType, fileUri = attachment.remoteUri)))
-                        }
-                        // Note: Inline data for history is tricky because we don't store the base64 in DB.
-                        // Gemini usually expects the full context. If it's inline, we'd have to re-read and re-encode.
-                        else if (attachment.fileSize < 20 * 1024 * 1024) {
+                        } else if (attachment.fileSize < 20 * 1024 * 1024) {
                             val part = prepareAttachmentPart(attachment, apiKey)
                             if (part != null) parts.add(part)
                         }
@@ -347,11 +352,6 @@ class ChatViewModel(
                     return@launch
                 }
                 
-                android.util.Log.d("ChatViewModel", "Response text: $responseText")
-                android.util.Log.d("ChatViewModel", "Response thought: ${if (responseThought != null) "Present" else "Null"}")
-                android.util.Log.d("ChatViewModel", "Grounding metadata: ${if (groundingMetadata != null) "Present" else "Null"}")
-
-                // Save assistant message to DB
                 withContext(Dispatchers.IO) {
                     chatDao.insertMessage(
                         MessageEntity(
@@ -364,8 +364,7 @@ class ChatViewModel(
                     )
                 }
                 _loadingMessage.value = null
-            } catch (e: kotlinx.coroutines.CancellationException) {
-                // Ignore cancellation
+            } catch (_: kotlinx.coroutines.CancellationException) {
             } catch (e: retrofit2.HttpException) {
                 val errorBody = e.response()?.errorBody()?.string()
                 val descriptiveMessage = try {
@@ -399,7 +398,6 @@ class ChatViewModel(
         _loadingMessage.value = null
     }
 
-    fun getCancelledMessageId(): Long? = lastUserMessageId
 }
 
 class ChatViewModelFactory(
@@ -418,175 +416,6 @@ class ChatViewModelFactory(
     }
 }
 
-class TtsManager(context: Context, private val onFinished: () -> Unit = {}) {
-    private val sherpaManager = SherpaManager(context)
-    private var audioTrack: AudioTrack? = null
-    private var isReady = false
-    private var initFailed = false
-
-    init {
-        // Models are now expected to be in the app's internal storage downloaded_models/models/tts/
-        val modelsDir = File(context.getExternalFilesDir(null), "downloaded_models/models/tts")
-        val rootModelsDir = File(context.getExternalFilesDir(null), "downloaded_models/models")
-        val scope = kotlinx.coroutines.CoroutineScope(Dispatchers.IO)
-        
-        scope.launch {
-            val settingsManager = SettingsManager(context)
-            settingsManager.sherpaVoice.collect { selectedVoice ->
-                // 1. First load TTS
-                if (selectedVoice.isNotEmpty()) {
-                    val voiceDir = File(modelsDir, selectedVoice)
-                    val modelFile = voiceDir.listFiles { file -> file.extension == "onnx" }?.firstOrNull()
-                    val tokensFile = File(voiceDir, "tokens.txt")
-                    val espeakDataDir = File(modelsDir, "espeak-ng-data")
-                    
-                    if (modelFile != null && modelFile.exists() && tokensFile.exists()) {
-                        sherpaManager.initTts(
-                            modelPath = modelFile.absolutePath,
-                            tokensPath = tokensFile.absolutePath,
-                            dataDir = espeakDataDir.absolutePath
-                        )
-                        isReady = true
-                        pendingText?.let {
-                            val textToSpeak = it
-                            pendingText = null
-                            speak(textToSpeak)
-                        }
-                    } else {
-                        initFailed = true
-                        onFinished()
-                    }
-                }
-                
-                // 2. Load VAD
-                val vadModelPath = File(rootModelsDir, "vad/silero_vad.onnx").absolutePath
-                if (File(vadModelPath).exists()) {
-                    sherpaManager.initVad(vadModelPath)
-                }
-                
-                // 3. Load STT (Whisper)
-                val sttDir = File(rootModelsDir, "stt")
-                val encoderPath = File(sttDir, "small-encoder.int8.onnx").absolutePath
-                val decoderPath = File(sttDir, "small-decoder.int8.onnx").absolutePath
-                val tokensPath = File(sttDir, "small-tokens.txt").absolutePath
-                
-                if (File(encoderPath).exists()) {
-                    val languagePref = settingsManager.sherpaLanguage.first()
-                    val whisperLang = languagePref.split("-").first().lowercase()
-                    sherpaManager.initStt(encoderPath, decoderPath, tokensPath, whisperLang)
-                } else {
-                    initFailed = true
-                    onFinished()
-                }
-            }
-        }
-    }
-
-    private var pendingText: String? = null
-    
-    private fun cleanTextForSpeech(text: String): String {
-        return text
-            // Remove markdown bold/italic asterisks and underscores
-            .replace(Regex("(?<!\\\\)[*_]"), "")
-            // Remove markdown headers
-            .replace(Regex("(?m)^#+\\s*"), "")
-            // Remove inline code ticks
-            .replace("`", "")
-            // Replace markdown links with just the text [Text](url) -> Text
-            .replace(Regex("\\[([^]]+)]\\([^)]+\\)"), "$1")
-            // Remove URLs that are standing alone
-            .replace(Regex("https?://\\S+"), "link")
-            // Clean up extra spaces
-            .replace(Regex("\\s+"), " ")
-            .trim()
-    }
-
-    fun speak(text: String) {
-        val cleanText = cleanTextForSpeech(text)
-        
-        if (initFailed) {
-            onFinished()
-            return
-        }
-        
-        if (!isReady) {
-            pendingText = cleanText
-            return
-        }
-
-        val audio = sherpaManager.speak(cleanText)
-        if (audio == null) {
-            onFinished()
-            return
-        }
-        
-        stop()
-
-        val sampleRate = audio.sampleRate 
-        
-        val bufferSize = AudioTrack.getMinBufferSize(
-            sampleRate,
-            AudioFormat.CHANNEL_OUT_MONO,
-            AudioFormat.ENCODING_PCM_16BIT
-        )
-
-        audioTrack = AudioTrack.Builder()
-            .setAudioAttributes(
-                AudioAttributes.Builder()
-                    .setUsage(AudioAttributes.USAGE_ASSISTANCE_NAVIGATION_GUIDANCE)
-                    .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
-                    .build()
-            )
-            .setAudioFormat(
-                AudioFormat.Builder()
-                    .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
-                    .setSampleRate(sampleRate)
-                    .setChannelMask(AudioFormat.CHANNEL_OUT_MONO)
-                    .build()
-            )
-            .setBufferSizeInBytes(audio.samples.size * 2)
-            .setTransferMode(AudioTrack.MODE_STATIC)
-            .build()
-
-        val samples = audio.samples
-        val shortArray = ShortArray(samples.size) { (samples[it] * 32767).toInt().toShort() }
-        
-        audioTrack?.setNotificationMarkerPosition(samples.size)
-        audioTrack?.setPlaybackPositionUpdateListener(object : AudioTrack.OnPlaybackPositionUpdateListener {
-            override fun onMarkerReached(track: AudioTrack?) {
-                onFinished()
-            }
-            override fun onPeriodicNotification(track: AudioTrack?) {}
-        })
-
-        audioTrack?.write(shortArray, 0, samples.size)
-        audioTrack?.play()
-    }
-
-    fun stop() {
-        audioTrack?.stop()
-        audioTrack?.release()
-        audioTrack = null
-    }
-
-    fun shutdown() {
-        stop()
-    }
-}
-
-@Composable
-fun rememberTextToSpeech(onFinished: () -> Unit = {}): TtsManager {
-    val context = LocalContext.current
-    val ttsManager = remember { TtsManager(context, onFinished) }
-    DisposableEffect(ttsManager) {
-        onDispose {
-            ttsManager.stop()
-            ttsManager.shutdown()
-        }
-    }
-    return ttsManager
-}
-
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalComposeUiApi::class)
 @Composable
 fun ChatScreen(
@@ -595,7 +424,7 @@ fun ChatScreen(
     database: ChatDatabase,
     modifier: Modifier = Modifier
 ) {
-    val context = LocalContext.current.applicationContext
+    val context = LocalContext.current
     val viewModel: ChatViewModel = viewModel(
         key = conversationId.toString(),
         factory = remember(conversationId) {
@@ -612,84 +441,28 @@ fun ChatScreen(
     val settingsManager = remember(context) { SettingsManager(context) }
     val userName by settingsManager.userName.collectAsState(initial = "User")
     val loadingMessage = viewModel.loadingMessage
+    
+    val draftText by viewModel.draftText.collectAsState()
     var inputText by remember { mutableStateOf("") }
+    
+    // Sync local inputText with draft from ViewModel
+    LaunchedEffect(draftText) {
+        if (inputText != draftText) {
+            inputText = draftText
+        }
+    }
+
     var editingMessageId by remember { mutableStateOf<Long?>(null) }
     val listState = rememberLazyListState()
     
-    val tts = rememberTextToSpeech()
-    LocalSoftwareKeyboardController.current
-
-    val sherpaManager = remember { SherpaManager(context) }
-    var isListening by remember { mutableStateOf(false) }
-    var currentVolume by remember { mutableStateOf(0f) }
+    val sheetState = rememberModalBottomSheetState()
+    var showGroundingSheet by remember { mutableStateOf(false) }
+    var selectedGroundingMetadata by remember { mutableStateOf<GroundingMetadata?>(null) }
     
-    var hasMicPermission by remember {
-        mutableStateOf(
-            androidx.core.content.ContextCompat.checkSelfPermission(
-                context,
-                android.Manifest.permission.RECORD_AUDIO
-            ) == android.content.pm.PackageManager.PERMISSION_GRANTED
-        )
-    }
+    var showThoughtSheet by remember { mutableStateOf(false) }
+    var selectedThought by remember { mutableStateOf<String?>(null) }
 
-    val micPermissionLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.RequestPermission()
-    ) { granted ->
-        hasMicPermission = granted
-        if (granted) {
-            isListening = true
-        } else {
-            android.widget.Toast.makeText(context, "Microphone permission required", android.widget.Toast.LENGTH_SHORT).show()
-        }
-    }
-
-    LaunchedEffect(isListening) {
-        if (isListening) {
-            kotlinx.coroutines.withContext(Dispatchers.IO) {
-                try {
-                    val sampleRate = 16000
-                    val bufferSize = android.media.AudioRecord.getMinBufferSize(sampleRate, android.media.AudioFormat.CHANNEL_IN_MONO, android.media.AudioFormat.ENCODING_PCM_16BIT)
-                    val audioRecord = android.media.AudioRecord(android.media.MediaRecorder.AudioSource.MIC, sampleRate, android.media.AudioFormat.CHANNEL_IN_MONO, android.media.AudioFormat.ENCODING_PCM_16BIT, bufferSize)
-                    
-                    sherpaManager.resetVad()
-                    audioRecord.startRecording()
-                    val buffer = ShortArray(bufferSize)
-                    
-                    while (isListening) {
-                        val read = audioRecord.read(buffer, 0, bufferSize)
-                        if (read > 0) {
-                            var sumSq = 0f
-                            val floats = FloatArray(read) {
-                                val floatVal = buffer[it] / 32767.0f
-                                sumSq += floatVal * floatVal
-                                floatVal
-                            }
-                            
-                            val rms = kotlin.math.sqrt(sumSq / read).toFloat()
-                            currentVolume = rms
-                            
-                            val transcription = sherpaManager.processAudioAndTranscribe(floats)
-                            if (!transcription.isNullOrEmpty()) {
-                                kotlinx.coroutines.withContext(Dispatchers.Main) {
-                                    isListening = false
-                                    val messageToSend = if (inputText.isBlank()) transcription else "$inputText $transcription"
-                                    inputText = ""
-                                    viewModel.sendMessage(messageToSend)
-                                }
-                            }
-                        }
-                    }
-                    audioRecord.stop()
-                    audioRecord.release()
-                } catch (e: Exception) {
-                    kotlinx.coroutines.withContext(Dispatchers.Main) {
-                        isListening = false
-                        android.widget.Toast.makeText(context, "Microphone error: ${e.message}", android.widget.Toast.LENGTH_SHORT).show()
-                    }
-                }
-            }
-        }
-    }
+    LocalSoftwareKeyboardController.current
 
     LaunchedEffect(messages.size, loadingMessage) {
         if (listState.firstVisibleItemIndex <= 2) {
@@ -757,10 +530,21 @@ fun ChatScreen(
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                 loadingMessage?.let {
-                    item { MessageBubble(it, userName, tts) }
+                    item { MessageBubble(it, userName) }
                 }
                 items(messages.asReversed()) { message ->
-                    MessageBubble(message, userName, tts)
+                    MessageBubble(
+                        message = message,
+                        userName = userName,
+                        onShowGrounding = {
+                            selectedGroundingMetadata = it
+                            showGroundingSheet = true
+                        },
+                        onShowThought = {
+                            selectedThought = it
+                            showThoughtSheet = true
+                        }
+                    )
                 }
             }
             
@@ -787,172 +571,244 @@ fun ChatScreen(
                 IconButton(onClick = { filePickerLauncher.launch("*/*") }) {
                     Icon(Icons.Default.Add, contentDescription = "Attach Files")
                 }
-                IconButton(onClick = {
-                    if (isListening) {
-                        isListening = false // Allow toggling off
-                    } else {
-                        if (hasMicPermission) {
-                            isListening = true
-                        } else {
-                            micPermissionLauncher.launch(android.Manifest.permission.RECORD_AUDIO)
-                        }
-                    }
-                }) {
-                    Icon(
-                        imageVector = Icons.Default.Mic,
-                        contentDescription = "Voice Input",
-                        tint = if (isListening) MaterialTheme.colorScheme.primary else LocalContentColor.current
-                    )
-                }
+                
                 OutlinedTextField(
                     value = inputText,
-                    onValueChange = { inputText = it },
+                    onValueChange = { 
+                        inputText = it
+                        viewModel.updateDraft(it)
+                    },
                     modifier = Modifier
                         .weight(1f)
                         .onKeyEvent { keyEvent ->
-                            if (keyEvent.type == KeyEventType.KeyDown && (keyEvent.key == Key.Enter || keyEvent.key == Key.NumPadEnter)) {
-                                if (inputText.isNotBlank()) {
-                                    viewModel.sendMessage(inputText, editingMessageId)
-                                    inputText = ""
-                                    editingMessageId = null
-                                }
+                            if (keyEvent.type == KeyEventType.KeyDown && keyEvent.key == Key.Enter && !keyEvent.isShiftPressed) {
+                                viewModel.sendMessage(inputText, editingMessageId)
+                                inputText = ""
+                                editingMessageId = null
                                 true
                             } else {
                                 false
                             }
                         },
                     placeholder = { Text("Type a message...") },
-                    singleLine = true,
+                    maxLines = 4,
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
                     keyboardActions = KeyboardActions(onSend = {
-                        if (inputText.isNotBlank()) {
-                            viewModel.sendMessage(inputText, editingMessageId)
-                            inputText = ""
-                            editingMessageId = null
+                        viewModel.sendMessage(inputText, editingMessageId)
+                        inputText = ""
+                        editingMessageId = null
+                    }),
+                    trailingIcon = {
+                        if (loadingMessage?.isLoading == true) {
+                            IconButton(onClick = { viewModel.cancelMessage() }) {
+                                Icon(Icons.Default.Stop, contentDescription = "Cancel")
+                            }
+                        } else if (inputText.isNotBlank() || viewModel.selectedAttachments.isNotEmpty()) {
+                            IconButton(onClick = {
+                                viewModel.sendMessage(inputText, editingMessageId)
+                                inputText = ""
+                                editingMessageId = null
+                            }) {
+                                Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Send")
+                            }
                         }
-                    })
+                    }
                 )
-                Spacer(modifier = Modifier.width(8.dp))
-                if (loadingMessage != null) {
-                    Button(onClick = {
-                        editingMessageId = viewModel.getCancelledMessageId()
-                        viewModel.cancelMessage()
-                        inputText = viewModel.lastUserMessage
-                        viewModel.addAttachments(viewModel.lastAttachments)
-                    }) {
-                        Text("Cancel")
-                    }
-                } else {
-                    Button(onClick = {
-                        if (inputText.isNotBlank()) {
-                            viewModel.sendMessage(inputText, editingMessageId)
-                            inputText = ""
-                            editingMessageId = null
-                        }
-                    }) {
-                        Text(if (editingMessageId != null) "Resend" else "Send")
-                    }
-                }
             }
         }
-    } // End of Scaffold
-    
-    // Microphone overlay
-    AnimatedMicOverlay(isListening = isListening, currentVolume = currentVolume)
-} // End of Box
-}
+    }
+    }
+    }
+
+    if (showGroundingSheet && selectedGroundingMetadata != null) {
+        ModalBottomSheet(
+            onDismissRequest = {
+                showGroundingSheet = false
+                selectedGroundingMetadata = null
+            },
+            sheetState = sheetState
+        ) {
+            GroundingContent(selectedGroundingMetadata!!)
+        }
+    }
+
+    if (showThoughtSheet && selectedThought != null) {
+        ModalBottomSheet(
+            onDismissRequest = {
+                showThoughtSheet = false
+                selectedThought = null
+            },
+            sheetState = sheetState
+        ) {
+            ThoughtContent(selectedThought!!)
+        }
+    }
 }
 
 @Composable
-fun MessageBubble(message: ChatMessage, userName: String, tts: TtsManager) {
-    val alignment = if (message.isUser) Alignment.End else Alignment.Start
-    val containerColor = if (message.isUser) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.secondaryContainer
-    val context = LocalContext.current
-    val clipboardManager = LocalClipboardManager.current
-    val screenWidth = androidx.compose.ui.platform.LocalConfiguration.current.screenWidthDp.dp
-
-    Column(modifier = Modifier.fillMaxWidth(), horizontalAlignment = alignment) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
-        ) {
+fun ThoughtContent(thought: String) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(16.dp)
+            .padding(bottom = 32.dp)
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Default.Psychology, contentDescription = null)
+            Spacer(modifier = Modifier.width(8.dp))
             Text(
-                text = if (message.isUser) userName else "Gemini",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.secondary
+                text = "Thought Process",
+                style = MaterialTheme.typography.titleLarge
             )
-            if (!message.isLoading && message.text.isNotBlank()) {
-                Spacer(modifier = Modifier.width(4.dp))
-                IconButton(
-                    onClick = { 
-                        tts.speak(message.text)
-                    },
-                    modifier = Modifier.size(16.dp)
+        }
+        
+        Spacer(modifier = Modifier.height(16.dp))
+        
+        Markdown(
+            content = thought,
+            modifier = Modifier.fillMaxWidth()
+        )
+    }
+}
+
+@Composable
+fun GroundingContent(metadata: GroundingMetadata) {
+    val uriHandler = LocalUriHandler.current
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(16.dp)
+            .padding(bottom = 32.dp)
+    ) {
+        Text(
+            text = "Grounding Sources",
+            style = MaterialTheme.typography.titleLarge,
+            modifier = Modifier.padding(bottom = 16.dp)
+        )
+
+        val entryPointHtml = metadata.searchEntryPoint?.html
+        if (entryPointHtml != null) {
+            Surface(
+                onClick = {
+                    val match = "href=\"(.*?)\"".toRegex().find(entryPointHtml)
+                    match?.groupValues?.get(1)?.let { url ->
+                        uriHandler.openUri(url)
+                    }
+                },
+                modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
+                shape = RoundedCornerShape(8.dp),
+                color = MaterialTheme.colorScheme.surfaceVariant
+            ) {
+                Row(
+                    modifier = Modifier.padding(12.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Icon(
-                        imageVector = Icons.Default.PlayArrow,
-                        contentDescription = "Play Audio",
-                        modifier = Modifier.size(14.dp),
-                        tint = MaterialTheme.colorScheme.secondary
-                    )
-                }
-                Spacer(modifier = Modifier.width(4.dp))
-                IconButton(
-                    onClick = { 
-                        clipboardManager.setText(AnnotatedString(message.text))
-                        android.widget.Toast.makeText(context, "Copied to clipboard", android.widget.Toast.LENGTH_SHORT).show()
-                    },
-                    modifier = Modifier.size(16.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.ContentCopy,
-                        contentDescription = "Copy",
-                        modifier = Modifier.size(12.dp),
-                        tint = MaterialTheme.colorScheme.secondary
+                    Icon(Icons.Default.Language, contentDescription = null)
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Text(
+                        text = "Search on Google",
+                        style = MaterialTheme.typography.bodyLarge,
+                        fontWeight = FontWeight.Bold
                     )
                 }
             }
         }
+
+        metadata.groundingChunks?.forEach { chunk ->
+            chunk.web?.let { web ->
+                if (web.uri != null && web.title != null) {
+                    Surface(
+                        onClick = { uriHandler.openUri(web.uri) },
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                        shape = RoundedCornerShape(8.dp),
+                        color = MaterialTheme.colorScheme.secondaryContainer
+                    ) {
+                        Column(modifier = Modifier.padding(12.dp)) {
+                            Text(
+                                text = web.title,
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.onSecondaryContainer
+                            )
+                            Text(
+                                text = web.uri,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.7f),
+                                maxLines = 1
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun MessageBubble(
+    message: ChatMessage,
+    userName: String,
+    onShowGrounding: (GroundingMetadata) -> Unit = {},
+    onShowThought: (String) -> Unit = {}
+) {
+    val alignment = if (message.isUser) Alignment.End else Alignment.Start
+    val containerColor = if (message.isUser) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.secondaryContainer
+    val contentColor = if (message.isUser) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSecondaryContainer
+
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalAlignment = alignment
+    ) {
         Surface(
-            shape = MaterialTheme.shapes.medium,
+            shape = RoundedCornerShape(12.dp),
             color = containerColor,
-            modifier = Modifier
-                .padding(vertical = 4.dp)
+            contentColor = contentColor,
+            modifier = Modifier.widthIn(max = 340.dp)
         ) {
-            Column(
-                modifier = Modifier
-                    .padding(12.dp)
-                    .widthIn(max = screenWidth * 0.85f)
-            ) {
+            Column(modifier = Modifier.padding(12.dp)) {
+                Text(
+                    text = if (message.isUser) userName else "Gemini",
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(bottom = 4.dp)
+                )
+                
                 if (message.isLoading) {
                     CircularProgressIndicator(
-                        modifier = Modifier.size(24.dp),
+                        modifier = Modifier.size(20.dp),
                         strokeWidth = 2.dp,
-                        color = MaterialTheme.colorScheme.onSecondaryContainer
+                        color = contentColor
                     )
                 } else {
-                    message.attachments?.let { attachments ->
-                        AttachmentPreviewGrid(attachments = attachments)
-                        Spacer(modifier = Modifier.height(8.dp))
+                    if (!message.thought.isNullOrBlank()) {
+                        Text(
+                            text = "View Thought Process",
+                            style = MaterialTheme.typography.bodySmall,
+                            textDecoration = TextDecoration.Underline,
+                            modifier = Modifier
+                                .padding(bottom = 4.dp)
+                                .clickable { onShowThought(message.thought) }
+                        )
                     }
 
-                    if (message.thought != null) {
-                        ThoughtDrawer(thought = message.thought)
-                        Spacer(modifier = Modifier.height(8.dp))
-                    }
+                    Markdown(content = message.text)
                     
-                    if (message.isUser) {
-                        Text(text = message.text, style = MaterialTheme.typography.bodyLarge)
-                    } else {
-                        Markdown(content = message.text)
+                    message.attachments?.let { attachments ->
+                        attachments.forEach { attachment ->
+                            AttachmentPreview(attachment)
+                        }
                     }
 
                     if (message.groundingMetadata != null) {
-                        val hasLinks = message.groundingMetadata.groundingChunks?.any { it.web != null } == true
-                        if (hasLinks) {
-                            Spacer(modifier = Modifier.height(8.dp))
-                            GroundingDrawer(metadata = message.groundingMetadata)
-                        }
+                        Text(
+                            text = "View Sources",
+                            style = MaterialTheme.typography.bodySmall,
+                            fontStyle = FontStyle.Italic,
+                            textDecoration = TextDecoration.Underline,
+                            modifier = Modifier
+                                .padding(top = 8.dp)
+                                .clickable { onShowGrounding(message.groundingMetadata) }
+                        )
                     }
                 }
             }
@@ -961,192 +817,58 @@ fun MessageBubble(message: ChatMessage, userName: String, tts: TtsManager) {
 }
 
 @Composable
-fun ThoughtDrawer(thought: String) {
-    var expanded by remember { mutableStateOf(false) }
+fun AttachmentPreview(attachment: Attachment) {
+    val isImage = attachment.mimeType.startsWith("image/")
     
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(8.dp))
-            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
-            .clickable { expanded = !expanded }
-            .padding(8.dp)
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Icon(
-                imageVector = if (expanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
-                contentDescription = null,
-                modifier = Modifier.size(16.dp)
-            )
-            Spacer(modifier = Modifier.width(4.dp))
+    if (isImage) {
+        AsyncImage(
+            model = attachment.uri,
+            contentDescription = attachment.fileName,
+            modifier = Modifier
+                .padding(top = 8.dp)
+                .fillMaxWidth()
+                .heightIn(max = 200.dp)
+                .clip(RoundedCornerShape(8.dp))
+        )
+    } else {
+        Row(
+            modifier = Modifier
+                .padding(top = 8.dp)
+                .fillMaxWidth()
+                .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(8.dp))
+                .padding(8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(Icons.Default.Description, contentDescription = null)
+            Spacer(modifier = Modifier.width(8.dp))
             Text(
-                text = "Model Thinking",
-                style = MaterialTheme.typography.labelMedium,
-                fontStyle = FontStyle.Italic
-            )
-        }
-        AnimatedVisibility(visible = expanded) {
-            Text(
-                text = thought,
+                text = attachment.fileName,
                 style = MaterialTheme.typography.bodySmall,
-                modifier = Modifier.padding(top = 4.dp),
-                color = MaterialTheme.colorScheme.onSurfaceVariant
+                maxLines = 1
             )
         }
     }
 }
 
 @Composable
-fun AttachmentChip(
-    attachment: Attachment,
-    onRemove: () -> Unit
-) {
+fun AttachmentChip(attachment: Attachment, onRemove: () -> Unit) {
     Surface(
         shape = RoundedCornerShape(16.dp),
-        color = MaterialTheme.colorScheme.secondaryContainer,
-        modifier = Modifier.padding(vertical = 4.dp)
+        color = MaterialTheme.colorScheme.surfaceVariant,
+        modifier = Modifier.height(32.dp)
     ) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.padding(start = 8.dp, end = 4.dp, top = 4.dp, bottom = 4.dp)
+            modifier = Modifier.padding(horizontal = 8.dp)
         ) {
-            if (attachment.mimeType.startsWith("image/")) {
-                AsyncImage(
-                    model = attachment.uri,
-                    contentDescription = null,
-                    modifier = Modifier
-                        .size(24.dp)
-                        .clip(RoundedCornerShape(4.dp))
-                )
-                Spacer(modifier = Modifier.width(8.dp))
-            }
             Text(
                 text = attachment.fileName,
-                style = MaterialTheme.typography.labelMedium,
-                maxLines = 1
+                style = MaterialTheme.typography.bodySmall,
+                maxLines = 1,
+                modifier = Modifier.widthIn(max = 100.dp)
             )
-            IconButton(onClick = onRemove, modifier = Modifier.size(24.dp)) {
-                Icon(Icons.Default.Close, contentDescription = "Remove", modifier = Modifier.size(16.dp))
-            }
-        }
-    }
-}
-
-@Composable
-fun AttachmentPreviewGrid(attachments: List<Attachment>) {
-    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        attachments.forEach { attachment ->
-            Surface(
-                shape = RoundedCornerShape(8.dp),
-                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
-            ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.padding(8.dp)
-                ) {
-                    if (attachment.mimeType.startsWith("image/")) {
-                        AsyncImage(
-                            model = attachment.uri,
-                            contentDescription = null,
-                            modifier = Modifier
-                                .size(40.dp)
-                                .clip(RoundedCornerShape(4.dp))
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                    }
-                    Column {
-                        Text(
-                            text = attachment.fileName,
-                            style = MaterialTheme.typography.labelMedium,
-                            maxLines = 1
-                        )
-                        Text(
-                            text = "${attachment.fileSize / 1024} KB",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-fun GroundingDrawer(metadata: GroundingMetadata) {
-    var expanded by remember { mutableStateOf(false) }
-    val uriHandler = LocalUriHandler.current
-    
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(8.dp))
-            .background(MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.3f))
-            .clickable { expanded = !expanded }
-            .padding(8.dp)
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Icon(
-                imageVector = Icons.Default.Search,
-                contentDescription = null,
-                modifier = Modifier.size(16.dp),
-                tint = MaterialTheme.colorScheme.tertiary
-            )
-            Spacer(modifier = Modifier.width(4.dp))
-            Text(
-                text = "Sources & Search",
-                style = MaterialTheme.typography.labelMedium,
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.tertiary
-            )
-            Spacer(modifier = Modifier.weight(1f))
-            Icon(
-                imageVector = if (expanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
-                contentDescription = null,
-                modifier = Modifier.size(16.dp)
-            )
-        }
-        AnimatedVisibility(visible = expanded) {
-            Column(modifier = Modifier.padding(top = 8.dp)) {
-                metadata.groundingChunks?.forEach { chunk ->
-                    chunk.web?.let { web ->
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable { web.uri?.let { uriHandler.openUri(it) } }
-                                .padding(vertical = 4.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(
-                                text = "•",
-                                style = MaterialTheme.typography.bodySmall,
-                                modifier = Modifier.padding(end = 8.dp)
-                            )
-                            Text(
-                                text = web.title ?: "Source",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.primary,
-                                textDecoration = TextDecoration.Underline
-                            )
-                            web.title?.let { title ->
-                                Text(
-                                    text = " - $title",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
-                        }
-                        
-                    }
-                }
-                
-                metadata.searchEntryPoint?.html?.let { _ ->
-                    Text(
-                        text = "Google Search results are available for this response.",
-                        style = MaterialTheme.typography.labelSmall,
-                        modifier = Modifier.padding(top = 4.dp)
-                    )
-                }
+            IconButton(onClick = onRemove, modifier = Modifier.size(16.dp)) {
+                Icon(Icons.Default.Close, contentDescription = "Remove", modifier = Modifier.size(12.dp))
             }
         }
     }

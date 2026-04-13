@@ -96,14 +96,10 @@ class SettingsManager(private val context: Context) {
         val GEMINI_MODEL = stringPreferencesKey("gemini_model")
         val GOOGLE_GROUNDING_ENABLED = booleanPreferencesKey("google_grounding_enabled")
         val GEMINI_THINKING_LEVEL = stringPreferencesKey("gemini_thinking_level")
-        val CHAT_HISTORY = stringPreferencesKey("chat_history")
         val CONVERSATIONS_LIMIT = stringPreferencesKey("conversations_limit")
         val USER_NAME = stringPreferencesKey("user_name")
         val SCREENSHOT_PROTECTION = booleanPreferencesKey("screenshot_protection")
         val CLEAR_HISTORY_ON_CLOSE = booleanPreferencesKey("clear_history_on_close")
-        val SHERPA_LANGUAGE = stringPreferencesKey("sherpa_language")
-        val SHERPA_VOICE = stringPreferencesKey("sherpa_voice")
-        val SHERPA_MODELS_DOWNLOADED = booleanPreferencesKey("sherpa_models_downloaded")
     }
 
     val screenshotProtection: Flow<Boolean> = context.dataStore.data.map { preferences ->
@@ -162,36 +158,6 @@ class SettingsManager(private val context: Context) {
     suspend fun saveGoogleGroundingEnabled(enabled: Boolean) {
         context.dataStore.edit { preferences ->
             preferences[GOOGLE_GROUNDING_ENABLED] = enabled
-        }
-    }
-
-    val sherpaLanguage: Flow<String> = context.dataStore.data.map { preferences ->
-        preferences[SHERPA_LANGUAGE] ?: "en-US"
-    }
-
-    val sherpaVoice: Flow<String> = context.dataStore.data.map { preferences ->
-        preferences[SHERPA_VOICE] ?: ""
-    }
-
-    val sherpaModelsDownloaded: Flow<Boolean> = context.dataStore.data.map { preferences ->
-        preferences[SHERPA_MODELS_DOWNLOADED] ?: false
-    }
-
-    suspend fun saveSherpaLanguage(language: String) {
-        context.dataStore.edit { preferences ->
-            preferences[SHERPA_LANGUAGE] = language
-        }
-    }
-
-    suspend fun saveSherpaVoice(voice: String) {
-        context.dataStore.edit { preferences ->
-            preferences[SHERPA_VOICE] = voice
-        }
-    }
-
-    suspend fun saveSherpaModelsDownloaded(downloaded: Boolean) {
-        context.dataStore.edit { preferences ->
-            preferences[SHERPA_MODELS_DOWNLOADED] = downloaded
         }
     }
 

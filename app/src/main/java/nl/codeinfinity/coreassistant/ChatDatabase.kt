@@ -14,7 +14,8 @@ import net.sqlcipher.database.SupportFactory
 data class Conversation(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
     val title: String,
-    val isVoiceAssistant: Boolean = false,
+    val draftText: String = "",
+    val lastDraftUpdate: Long = 0,
     val lastModified: Long = System.currentTimeMillis()
 )
 
@@ -89,6 +90,9 @@ interface ChatDao {
     @Delete
     suspend fun deleteConversation(conversation: Conversation)
 
+    @Query("SELECT * FROM conversations WHERE id = :id")
+    suspend fun getConversationById(id: Long): Conversation?
+
     @Query("SELECT * FROM messages WHERE conversationId = :conversationId ORDER BY timestamp ASC")
     fun getMessagesForConversation(conversationId: Long): Flow<List<MessageEntity>>
 
@@ -103,26 +107,37 @@ interface ChatDao {
         return insertConversation(Conversation(title = title))
     }
     
-    @Query("DELETE FROM conversations WHERE id NOT IN (SELECT id FROM conversations WHERE title != 'Voice Assistant' ORDER BY lastModified DESC LIMIT :limit) AND title != 'Voice Assistant'")
+    @Query("DELETE FROM conversations WHERE id NOT IN (SELECT id FROM conversations ORDER BY lastModified DESC LIMIT :limit)")
     suspend fun deleteOldConversations(limit: Int)
 
-    @Query("SELECT * FROM conversations WHERE title = 'Voice Assistant' LIMIT 1")
-    suspend fun getVoiceAssistantConversation(): Conversation?
-
-    @Transaction
-    suspend fun getOrCreateVoiceAssistantConversation(): Long {
-        val existing = getVoiceAssistantConversation()
-        if (existing != null) {
-            return existing.id
-        }
-        return insertConversation(Conversation(title = "Voice Assistant"))
-    }
+    @Query("UPDATE conversations SET draftText = :draft, lastDraftUpdate = :timestamp WHERE id = :id")
+    suspend fun updateDraft(id: Long, draft: String, timestamp: Long)
 }
 
-@Database(entities = [Conversation::class, MessageEntity::class], version = 3, exportSchema = false)
+@Entity(tableName = "gemini_models")
+data class GeminiModelEntity(
+    @PrimaryKey val name: String,
+    val displayName: String,
+    val description: String
+)
+
+@Dao
+interface GeminiModelDao {
+    @Query("SELECT * FROM gemini_models")
+    fun getAllModels(): Flow<List<GeminiModelEntity>>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertModels(models: List<GeminiModelEntity>)
+
+    @Query("DELETE FROM gemini_models")
+    suspend fun deleteAllModels()
+}
+
+@Database(entities = [Conversation::class, MessageEntity::class, GeminiModelEntity::class], version = 5, exportSchema = false)
 @TypeConverters(Converters::class)
 abstract class ChatDatabase : RoomDatabase() {
     abstract fun chatDao(): ChatDao
+    abstract fun geminiModelDao(): GeminiModelDao
 
     companion object {
         @Volatile
@@ -150,7 +165,7 @@ abstract class ChatDatabase : RoomDatabase() {
                 )
                 .openHelperFactory(factory)
                 // TODO: Replace with proper migrations before production release
-                // Current version is 3. Fallback to destructive migration is used for simplicity during development.
+                // Fallback to destructive migration is used for simplicity during development.
                 .fallbackToDestructiveMigration(true)
 
                 var instance = builder.build()

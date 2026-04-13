@@ -1,6 +1,5 @@
 package nl.codeinfinity.coreassistant
 
-import android.content.Context
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -14,22 +13,24 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
-import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
-import java.io.File
+import kotlinx.coroutines.withContext
 
-class SettingsViewModel(private val settingsManager: SettingsManager, private val context: Context) : ViewModel() {
+class SettingsViewModel(
+    private val settingsManager: SettingsManager,
+    private val database: ChatDatabase
+) : ViewModel() {
 
     val apiKey: StateFlow<String> = settingsManager.geminiApiKey
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "")
@@ -52,40 +53,16 @@ class SettingsViewModel(private val settingsManager: SettingsManager, private va
     val clearHistoryOnClose: StateFlow<Boolean> = settingsManager.clearHistoryOnClose
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
 
-    private val _availableModels = mutableStateListOf<GeminiModel>()
-    val availableModels: List<GeminiModel> = _availableModels
+    val availableModels: StateFlow<List<GeminiModel>> = database.geminiModelDao().getAllModels()
+        .map { entities ->
+            entities.map { entity ->
+                GeminiModel(entity.name, entity.displayName, entity.description)
+            }
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     private val apiService: GeminiApiService by lazy {
         GeminiApiService.create()
-    }
-
-    val sherpaLanguage: StateFlow<String> = settingsManager.sherpaLanguage
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "en-US")
-
-    val sherpaVoice: StateFlow<String> = settingsManager.sherpaVoice
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "")
-
-    private val _availableTtsModels = MutableStateFlow<List<String>>(emptyList())
-    val availableTtsModels = _availableTtsModels.asStateFlow()
-
-    init {
-        loadAvailableTtsModels()
-    }
-
-    private fun loadAvailableTtsModels() {
-        viewModelScope.launch {
-            val modelsDir = File(context.getExternalFilesDir(null), "downloaded_models/models/tts")
-            val models = modelsDir.listFiles { file -> file.isDirectory && file.name != "espeak-ng-data" }
-                ?.map { it.name } ?: emptyList()
-            _availableTtsModels.value = models
-        }
-    }
-
-    fun saveSherpaSettings(language: String, voice: String) {
-        viewModelScope.launch {
-            settingsManager.saveSherpaLanguage(language)
-            settingsManager.saveSherpaVoice(voice)
-        }
     }
 
     fun fetchModels() {
@@ -93,10 +70,23 @@ class SettingsViewModel(private val settingsManager: SettingsManager, private va
             try {
                 val key = apiKey.value
                 if (key.isNotBlank()) {
-                    val response = apiService.getModels(key)
-                    _availableModels.clear()
-                    // Filter for generateContent compatible models (simplified check)
-                    _availableModels.addAll(response.models.filter { it.name.contains("gemini") })
+                    val response = withContext(Dispatchers.IO) {
+                        apiService.getModels(key)
+                    }
+                    val filteredModels = response.models.filter {
+                        it.name.startsWith("models/") &&
+                        (it.displayName.contains("Gemini", ignoreCase = true))
+                    }
+                    
+                    if (filteredModels.isNotEmpty()) {
+                        withContext(Dispatchers.IO) {
+                            val entities = filteredModels.map {
+                                GeminiModelEntity(it.name, it.displayName, it.description)
+                            }
+                            database.geminiModelDao().deleteAllModels()
+                            database.geminiModelDao().insertModels(entities)
+                        }
+                    }
                 }
             } catch (_: Exception) {
                 // Handle error
@@ -158,13 +148,14 @@ class SettingsViewModel(private val settingsManager: SettingsManager, private va
 fun SettingsScreen(
     onBack: () -> Unit,
     onNavigateToLicenses: () -> Unit,
-    settingsManager: SettingsManager = SettingsManager(LocalContext.current)
+    settingsManager: SettingsManager = SettingsManager(LocalContext.current),
+    database: ChatDatabase
 ) {
     val context = LocalContext.current
     val viewModel: SettingsViewModel = viewModel(factory = object : androidx.lifecycle.ViewModelProvider.Factory {
         @Suppress("UNCHECKED_CAST")
         override fun <T : ViewModel> create(modelClass: Class<T>): T {
-            return SettingsViewModel(settingsManager, context) as T
+            return SettingsViewModel(settingsManager, database) as T
         }
     })
 
@@ -176,10 +167,7 @@ fun SettingsScreen(
     val thinkingLevel by viewModel.thinkingLevel.collectAsState()
     val screenshotProtection by viewModel.screenshotProtection.collectAsState()
     val clearHistoryOnClose by viewModel.clearHistoryOnClose.collectAsState()
-    val sherpaLanguagePref by viewModel.sherpaLanguage.collectAsState()
-    val sherpaVoicePref by viewModel.sherpaVoice.collectAsState()
-    val availableTtsModels by viewModel.availableTtsModels.collectAsState()
-    val availableModels = viewModel.availableModels
+    val availableModels by viewModel.availableModels.collectAsState()
 
     var apiKey by remember { mutableStateOf("") }
     var userName by remember { mutableStateOf("") }
@@ -200,8 +188,6 @@ fun SettingsScreen(
     var expanded by remember { mutableStateOf(false) }
     var thinkingExpanded by remember { mutableStateOf(false) }
     var apiKeyVisible by remember { mutableStateOf(false) }
-    var langMenuExpanded by remember { mutableStateOf(false) }
-    var voiceMenuExpanded by remember { mutableStateOf(false) }
 
     Scaffold(
         topBar = {
@@ -351,90 +337,6 @@ fun SettingsScreen(
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
-
-            HorizontalDivider()
-            Text("Voice Assistant (Sherpa-ONNX)", style = MaterialTheme.typography.titleMedium)
-
-            Box(modifier = Modifier.fillMaxWidth()) {
-                OutlinedTextField(
-                    value = sherpaLanguagePref,
-                    onValueChange = {},
-                    label = { Text("Language") },
-                    readOnly = true,
-                    modifier = Modifier.fillMaxWidth(),
-                    trailingIcon = {
-                        IconButton(onClick = { langMenuExpanded = true }) {
-                            Icon(Icons.Default.ArrowDropDown, contentDescription = "Select Language")
-                        }
-                    }
-                )
-                DropdownMenu(
-                    expanded = langMenuExpanded,
-                    onDismissRequest = { langMenuExpanded = false },
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    listOf("en-US", "nl-NL", "de-DE", "fr-FR", "es-ES", "it-IT").forEach { lang ->
-                        DropdownMenuItem(
-                            text = { Text(lang) },
-                            onClick = {
-                                viewModel.saveSherpaSettings(lang, sherpaVoicePref)
-                                langMenuExpanded = false
-                            }
-                        )
-                    }
-                }
-            }
-
-            Box(modifier = Modifier.fillMaxWidth()) {
-                OutlinedTextField(
-                    value = if (sherpaVoicePref.isEmpty()) "Select Model" else sherpaVoicePref,
-                    onValueChange = {},
-                    label = { Text("Voice Model") },
-                    readOnly = true,
-                    modifier = Modifier.fillMaxWidth(),
-                    trailingIcon = {
-                        IconButton(onClick = { voiceMenuExpanded = true }) {
-                            Icon(Icons.Default.ArrowDropDown, contentDescription = "Select Voice Model")
-                        }
-                    }
-                )
-                DropdownMenu(
-                    expanded = voiceMenuExpanded,
-                    onDismissRequest = { voiceMenuExpanded = false },
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    availableTtsModels.forEach { model ->
-                        DropdownMenuItem(
-                            text = { Text(model) },
-                            onClick = {
-                                viewModel.saveSherpaSettings(sherpaLanguagePref, model)
-                                voiceMenuExpanded = false
-                            }
-                        )
-                    }
-                }
-            }
-
-            HorizontalDivider()
-            Text("System Integration", style = MaterialTheme.typography.titleMedium)
-
-            val systemContext = LocalContext.current
-            Button(
-                onClick = {
-                    try {
-                        systemContext.startActivity(android.content.Intent(android.provider.Settings.ACTION_VOICE_INPUT_SETTINGS))
-                    } catch (e: Exception) {
-                        try {
-                            systemContext.startActivity(android.content.Intent(android.provider.Settings.ACTION_MANAGE_DEFAULT_APPS_SETTINGS))
-                        } catch (e2: Exception) {
-                            android.widget.Toast.makeText(systemContext, "Cannot open settings", android.widget.Toast.LENGTH_SHORT).show()
-                        }
-                    }
-                },
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Text("Set as Default Voice Assistant")
-            }
 
             HorizontalDivider()
             Text("Privacy Settings", style = MaterialTheme.typography.titleMedium)

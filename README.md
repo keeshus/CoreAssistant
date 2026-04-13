@@ -1,48 +1,39 @@
 # CoreAssistant
 
-A privacy-focused, feature-rich LLM chat application for Android, powered by the Google Gemini API.
+A privacy-focused, lightweight LLM chat application for Android, powered by the Google Gemini API.
 
-## Features
+## 🚀 Features
 
 - **Gemini AI Chat**: Engage in intelligent conversations using various Gemini models (Flash, Pro, etc.).
-- **Voice Assistant**: Integrated voice interaction service using Sherpa-ONNX for local STT/TTS. Set CoreAssistant as your default digital assistant to trigger it with a long-press of the power button or "Hey Google".
-- **Local Model Management**:
-    - **Download Manager**: Models are downloaded and extracted directly within the app's setup screen to keep the initial APK size small.
-    - **Integrity Checks**: All model downloads are verified using SHA-256 checksums.
-    - **Dynamic Reloading**: Voice models can be switched in settings and are reloaded instantly without restarting the app.
+- **Auto-Save Drafts**: Never lose what you type. Your message drafts are saved at short intervals for every conversation.
 - **Multimodal Support**: Send images and files along with your text prompts for visual analysis and document processing.
-- **Model Thinking**: View the model's internal "thought" process for supported models to understand how it arrived at an answer.
-- **Google Grounding**: Enable real-time search grounding to get up-to-date information and verifiable sources/links in responses.
+- **Model Thinking**: View the model's internal "thought" process to understand how it arrived at an answer.
+- **Google Grounding**: Enable real-time search grounding to get up-to-date information with verifiable sources.
 - **Privacy & Security**:
-    - **Encrypted Database**: All chat history is stored locally using SQLCipher encryption.
-    - **Screenshot Protection**: Option to block screenshots and hide app content in the recent apps switcher.
+    - **Encrypted Database**: All chat history and drafts are stored locally using SQLCipher encryption.
+    - **Screenshot Protection**: Block screenshots and hide app content in the recent apps switcher.
     - **Auto-Clear History**: Optional setting to automatically delete all conversations when the app is closed.
 - **Customization**:
     - Choose from different Gemini models.
-    - Adjust "Thinking Level" for models that support it.
+    - Adjust "Thinking Level" for supported models.
     - Personalize your name for the AI.
-    - Configure the maximum number of conversations to keep.
-- **Performance Optimized**: Models are loaded in a specific sequence (TTS -> VAD -> STT) to ensure the interface is responsive as quickly as possible.
 
-## Setup
+## 🛠️ Setup
 
-1. Obtain a **Gemini API Key** from the [Google AI Studio](https://aistudio.google.com/).
-    - **Privacy Tip**: If you upgrade to **Tier 1** (by adding a credit card) in AI Studio, Google will not use your prompts or responses to train their models.
-2. Enter your API key in the app's setup screen.
-3. Use the **Download Manager** in the setup screen to fetch the required Sherpa-ONNX models.
-4. (Optional) Set CoreAssistant as your **Default Digital Assistant** in Android Settings for the best voice experience.
+1. Obtain a **Gemini API Key** from [Google AI Studio](https://aistudio.google.com/).
+2. Enter your API key and your name in the app's initial setup screen.
+3. Start chatting!
 
-## Tech Stack
+## 🏗️ Tech Stack
 
-- **Language**: Kotlin
-- **UI**: Jetpack Compose
-- **Local AI**: Sherpa-ONNX (Whisper for STT, VITS for TTS)
-- **Networking**: Retrofit & OkHttp
-- **Local Storage**: Room with SQLCipher (Encrypted)
-- **Image Loading**: Coil
-- **Markdown**: Multiplatform Markdown Renderer
-- **AI**: Google Gemini API
+- **Language**: [Kotlin](https://kotlinlang.org/)
+- **UI**: [Jetpack Compose](https://developer.android.com/compose)
+- **Local Storage**: [Room](https://developer.android.com/training/data-storage/room) with [SQLCipher](https://www.zetetic.net/sqlcipher/) (Encrypted)
+- **Networking**: [Retrofit](https://square.github.io/retrofit/) & [OkHttp](https://square.github.io/okhttp/)
+- **Image Loading**: [Coil](https://coil-kt.github.io/coil/)
+- **Markdown**: [Multiplatform Markdown Renderer](https://github.com/mikepenz/Multiplatform-Markdown-Renderer)
+- **AI**: [Google Gemini API](https://ai.google.dev/)
 
-## License
+## 📄 License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.

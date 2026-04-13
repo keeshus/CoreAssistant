@@ -1,330 +1,253 @@
 package nl.codeinfinity.coreassistant
 
-import android.content.Context
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.ViewModel
-import androidx.lifecycle.viewModelScope
-import androidx.lifecycle.viewmodel.compose.viewModel
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.SharingStarted
-import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import java.io.File
+import kotlinx.coroutines.withContext
 
-class SetupViewModel(private val settingsManager: SettingsManager, private val context: Context) : ViewModel() {
-    val apiKey: StateFlow<String> = settingsManager.geminiApiKey
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "")
-
-    val userName: StateFlow<String> = settingsManager.userName
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "")
-
-    val sherpaLanguage: StateFlow<String> = settingsManager.sherpaLanguage
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "en-US")
-
-    val sherpaVoice: StateFlow<String> = settingsManager.sherpaVoice
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "")
-
-    private val _availableTtsModels = MutableStateFlow<List<String>>(emptyList())
-    val availableTtsModels = _availableTtsModels.asStateFlow()
-
-    init {
-        loadAvailableTtsModels()
-    }
-
-    fun loadAvailableTtsModels() {
-        viewModelScope.launch {
-            val modelsDir = File(context.getExternalFilesDir(null), "downloaded_models/models/tts")
-            val models = modelsDir.listFiles { file -> file.isDirectory && file.name != "espeak-ng-data" }
-                ?.map { it.name } ?: emptyList()
-            _availableTtsModels.value = models
-        }
-    }
-
-    fun saveApiKey(key: String) {
-        viewModelScope.launch {
-            settingsManager.saveGeminiApiKey(key)
-        }
-    }
-
-    fun saveUserName(name: String) {
-        viewModelScope.launch {
-            settingsManager.saveUserName(name)
-        }
-    }
-
-    fun saveSherpaSettings(language: String, voice: String) {
-        viewModelScope.launch {
-            settingsManager.saveSherpaLanguage(language)
-            settingsManager.saveSherpaVoice(voice)
-        }
-    }
-}
-
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SetupScreen(
     onSetupComplete: () -> Unit,
-    settingsManager: SettingsManager
+    settingsManager: SettingsManager,
+    database: ChatDatabase
 ) {
-    val context = LocalContext.current
-    val viewModel: SetupViewModel = viewModel(factory = object : androidx.lifecycle.ViewModelProvider.Factory {
-        @Suppress("UNCHECKED_CAST")
-        override fun <T : ViewModel> create(modelClass: Class<T>): T {
-            return SetupViewModel(settingsManager, context) as T
-        }
-    })
-
-    val apiKeyPref by viewModel.apiKey.collectAsState()
-    val userNamePref by viewModel.userName.collectAsState()
-    val sherpaLanguagePref by viewModel.sherpaLanguage.collectAsState()
-    val sherpaVoicePref by viewModel.sherpaVoice.collectAsState()
-    val availableTtsModels by viewModel.availableTtsModels.collectAsState()
-
-    var apiKey by remember { mutableStateOf("") }
+    var step by remember { mutableStateOf(1) }
+    val scope = rememberCoroutineScope()
+    
+    // Step 1: User Name
     var userName by remember { mutableStateOf("") }
-    var selectedLanguage by remember { mutableStateOf("en-US") }
-    var selectedVoice by remember { mutableStateOf("") }
-
-    LaunchedEffect(apiKeyPref) {
-        if (apiKey != apiKeyPref) apiKey = apiKeyPref
-    }
-    LaunchedEffect(userNamePref) {
-        if (userNamePref != "User" && userName != userNamePref) {
-            userName = userNamePref
-        }
-    }
-    LaunchedEffect(sherpaLanguagePref) {
-        selectedLanguage = sherpaLanguagePref
-    }
-    LaunchedEffect(sherpaVoicePref) {
-        if (sherpaVoicePref.isNotEmpty()) selectedVoice = sherpaVoicePref
-    }
-    LaunchedEffect(availableTtsModels) {
-        if (selectedVoice.isEmpty() && availableTtsModels.isNotEmpty()) {
-            selectedVoice = availableTtsModels.first()
-        }
-    }
-
-    var isDownloading by remember { mutableStateOf(false) }
-    var isDownloadComplete by remember { mutableStateOf(false) }
-    var downloadProgress by remember { mutableStateOf(0f) }
-    var downloadStatus by remember { mutableStateOf("") }
-    val coroutineScope = rememberCoroutineScope()
-
+    
+    // Step 2: API Key
+    var apiKey by remember { mutableStateOf("") }
     var apiKeyVisible by remember { mutableStateOf(false) }
-    var langMenuExpanded by remember { mutableStateOf(false) }
-    var voiceMenuExpanded by remember { mutableStateOf(false) }
+    
+    // Step 3: Model Selection
+    var availableModels by remember { mutableStateOf<List<GeminiModel>>(emptyList()) }
+    var selectedModel by remember { mutableStateOf<GeminiModel?>(null) }
+    var isLoadingModels by remember { mutableStateOf(false) }
+    var modelFetchError by remember { mutableStateOf<String?>(null) }
 
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .systemBarsPadding()
-            .imePadding()
-            .verticalScroll(rememberScrollState())
-            .padding(24.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Top
-    ) {
-        Spacer(modifier = Modifier.height(48.dp))
-        Text(
-            text = "Welcome to Core Assistant",
-            style = MaterialTheme.typography.headlineMedium,
-            fontWeight = FontWeight.Bold,
-            textAlign = TextAlign.Center
-        )
-        
-        Spacer(modifier = Modifier.height(16.dp))
-        
-        Text(
-            text = "To get started, please enter your name and Gemini API Key.",
-            style = MaterialTheme.typography.bodyMedium,
-            textAlign = TextAlign.Center,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-        
-        Spacer(modifier = Modifier.height(32.dp))
-
-        if (isDownloading) {
-            Text(text = downloadStatus, style = MaterialTheme.typography.bodyMedium)
-            LinearProgressIndicator(progress = { downloadProgress }, modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp))
-            Spacer(modifier = Modifier.height(16.dp))
-        } else if (isDownloadComplete) {
-            Text(text = "Models Downloaded Successfully!", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.bodyMedium)
-            Spacer(modifier = Modifier.height(16.dp))
-        } else {
-            Button(
-                onClick = {
-                    coroutineScope.launch {
-                        isDownloading = true
-                        downloadProgress = 0f
-                        downloadStatus = "Downloading Models..."
-                        val modelsUrl = "https://bibocraftseu.blob.core.windows.net/settings/Models/models.tar.gz?sv=2025-07-05&spr=https&st=2026-03-17T17%3A12%3A24Z&se=2030-12-31T17%3A12%3A00Z&sr=b&sp=r&sig=u1w%2BoQV%2FqWBkR0UhbHl5GcKbw0p5%2BxvkbJYPWyEIYZc%3D"
-                        val checksumUrl = "https://bibocraftseu.blob.core.windows.net/settings/Models/models.tar.gz.sha256?sv=2025-07-05&spr=https&st=2026-03-17T20%3A15%3A46Z&se=2030-12-31T20%3A15%3A00Z&sr=b&sp=r&sig=BfbWfmntk6ZV7xOgoP8TSu7UMNSAGFtnfbgeHNFUV98%3D"
-                        val modelsSuccess = DownloadManager.downloadAndExtractModels(context, modelsUrl, checksumUrl) { progress ->
-                            downloadProgress = progress
-                        }
-
-                        if (modelsSuccess) {
-                            downloadStatus = "Download Complete!"
-                            viewModel.loadAvailableTtsModels()
-                            isDownloadComplete = true
-                        } else {
-                            downloadStatus = "Failed to download Models."
-                        }
-                        isDownloading = false
-                    }
-                },
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Text("Download Required Models")
-            }
-            if (downloadStatus.isNotEmpty() && !isDownloadComplete) {
-                Text(text = downloadStatus, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
-            }
-            Spacer(modifier = Modifier.height(16.dp))
+    Scaffold(
+        topBar = {
+            TopAppBar(title = { Text("Initial Setup") })
         }
-
-        OutlinedTextField(
-            value = userName,
-            onValueChange = {
-                userName = it
-            },
-            label = { Text("Your Name") },
-            placeholder = { Text("User") },
-            modifier = Modifier.fillMaxWidth(),
-            singleLine = true
-        )
-
-        Spacer(modifier = Modifier.height(16.dp))
-        
-        OutlinedTextField(
-            value = apiKey,
-            onValueChange = {
-                apiKey = it
-            },
-            label = { Text("Gemini API Key") },
-            modifier = Modifier.fillMaxWidth(),
-            singleLine = true,
-            visualTransformation = if (apiKeyVisible) VisualTransformation.None else PasswordVisualTransformation(),
-            trailingIcon = {
-                IconButton(onClick = { apiKeyVisible = !apiKeyVisible }) {
-                    Icon(
-                        imageVector = if (apiKeyVisible) Icons.Default.VisibilityOff else Icons.Default.Visibility,
-                        contentDescription = if (apiKeyVisible) "Hide API Key" else "Show API Key"
-                    )
-                }
-            }
-        )
-        
-        Spacer(modifier = Modifier.height(16.dp))
-
-        Text(
-            text = "Voice Assistant Settings",
-            style = MaterialTheme.typography.titleMedium,
-            fontWeight = FontWeight.SemiBold,
-            modifier = Modifier.fillMaxWidth(),
-            textAlign = TextAlign.Start
-        )
-
-        Spacer(modifier = Modifier.height(8.dp))
-
-        Box(modifier = Modifier.fillMaxWidth()) {
-            OutlinedTextField(
-                value = selectedLanguage,
-                onValueChange = {},
-                label = { Text("Language") },
-                readOnly = true,
-                modifier = Modifier.fillMaxWidth(),
-                trailingIcon = {
-                    IconButton(onClick = { langMenuExpanded = true }) {
-                        Icon(Icons.Default.ArrowDropDown, contentDescription = "Select Language")
-                    }
-                }
-            )
-            DropdownMenu(
-                expanded = langMenuExpanded,
-                onDismissRequest = { langMenuExpanded = false },
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                listOf("en-US", "nl-NL", "de-DE", "fr-FR", "es-ES", "it-IT").forEach { lang ->
-                    DropdownMenuItem(
-                        text = { Text(lang) },
-                        onClick = {
-                            selectedLanguage = lang
-                            langMenuExpanded = false
-                        }
-                    )
-                }
-            }
-        }
-
-        Spacer(modifier = Modifier.height(16.dp))
-
-        Box(modifier = Modifier.fillMaxWidth()) {
-            OutlinedTextField(
-                value = selectedVoice,
-                onValueChange = {},
-                label = { Text("Voice Model") },
-                readOnly = true,
-                modifier = Modifier.fillMaxWidth(),
-                trailingIcon = {
-                    IconButton(onClick = { voiceMenuExpanded = true }) {
-                        Icon(Icons.Default.ArrowDropDown, contentDescription = "Select Voice Model")
-                    }
-                }
-            )
-            DropdownMenu(
-                expanded = voiceMenuExpanded,
-                onDismissRequest = { voiceMenuExpanded = false },
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                availableTtsModels.forEach { model ->
-                    DropdownMenuItem(
-                        text = { Text(model) },
-                        onClick = {
-                            selectedVoice = model
-                            voiceMenuExpanded = false
-                        }
-                    )
-                }
-            }
-        }
-
-        Spacer(modifier = Modifier.height(24.dp))
-
-        Spacer(modifier = Modifier.height(32.dp))
-        
-        Button(
-            onClick = {
-                if (apiKey.isNotBlank()) {
-                    val finalUserName = if (userName.isBlank()) "User" else userName
-                    viewModel.saveUserName(finalUserName)
-                    viewModel.saveApiKey(apiKey)
-                    viewModel.saveSherpaSettings(selectedLanguage, selectedVoice)
-                    onSetupComplete()
-                }
-            },
-            modifier = Modifier.fillMaxWidth(),
-            enabled = apiKey.isNotBlank()
+    ) { padding ->
+        Column(
+            modifier = Modifier
+                .padding(padding)
+                .padding(24.dp)
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState()),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
         ) {
-            Text("Finish Setup")
+            when (step) {
+                1 -> {
+                    Text(
+                        "Welcome to Core Assistant",
+                        style = MaterialTheme.typography.headlineMedium,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        "Let's get started. What should I call you?",
+                        style = MaterialTheme.typography.bodyLarge
+                    )
+                    Spacer(modifier = Modifier.height(32.dp))
+                    OutlinedTextField(
+                        value = userName,
+                        onValueChange = { userName = it },
+                        label = { Text("Your Name") },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true
+                    )
+                    Spacer(modifier = Modifier.height(32.dp))
+                    Button(
+                        onClick = { 
+                            scope.launch {
+                                settingsManager.saveUserName(userName)
+                                step = 2
+                            }
+                        },
+                        enabled = userName.isNotBlank(),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("Next")
+                    }
+                }
+                2 -> {
+                    Text(
+                        "Gemini API Configuration",
+                        style = MaterialTheme.typography.headlineSmall,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        "This app uses Google's Gemini API. Please enter your API key to continue.",
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                    Spacer(modifier = Modifier.height(32.dp))
+                    OutlinedTextField(
+                        value = apiKey,
+                        onValueChange = { apiKey = it },
+                        label = { Text("Gemini API Key") },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                        visualTransformation = if (apiKeyVisible) VisualTransformation.None else PasswordVisualTransformation(),
+                        trailingIcon = {
+                            IconButton(onClick = { apiKeyVisible = !apiKeyVisible }) {
+                                Icon(
+                                    imageVector = if (apiKeyVisible) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                                    contentDescription = null
+                                )
+                            }
+                        }
+                    )
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Text(
+                        "You can get an API key from Google AI Studio (aistudio.google.com)",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(modifier = Modifier.height(32.dp))
+                    Button(
+                        onClick = {
+                            scope.launch {
+                                isLoadingModels = true
+                                modelFetchError = null
+                                try {
+                                    val apiService = GeminiApiService.create()
+                                    val response = withContext(Dispatchers.IO) {
+                                        apiService.getModels(apiKey)
+                                    }
+                                    val filteredModels = response.models.filter {
+                                        it.name.startsWith("models/") &&
+                                        (it.displayName.contains("Gemini", ignoreCase = true))
+                                    }
+                                    
+                                    if (filteredModels.isNotEmpty()) {
+                                        withContext(Dispatchers.IO) {
+                                            val entities = filteredModels.map {
+                                                GeminiModelEntity(it.name, it.displayName, it.description)
+                                            }
+                                            database.geminiModelDao().deleteAllModels()
+                                            database.geminiModelDao().insertModels(entities)
+                                        }
+                                        
+                                        availableModels = filteredModels
+                                        selectedModel = availableModels.firstOrNull { it.name.contains("gemini-1.5-flash") }
+                                            ?: availableModels.first()
+                                        step = 3
+                                    } else {
+                                        modelFetchError = "No compatible Gemini models found."
+                                    }
+                                } catch (e: Exception) {
+                                    modelFetchError = "Error fetching models: ${e.message}"
+                                } finally {
+                                    isLoadingModels = false
+                                }
+                            }
+                        },
+                        enabled = apiKey.isNotBlank() && !isLoadingModels,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        if (isLoadingModels) {
+                            CircularProgressIndicator(modifier = Modifier.size(24.dp), color = MaterialTheme.colorScheme.onPrimary)
+                        } else {
+                            Text("Next")
+                        }
+                    }
+                    if (modelFetchError != null) {
+                        Spacer(modifier = Modifier.height(16.dp))
+                        Text(modelFetchError!!, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                    }
+                    TextButton(onClick = { step = 1 }, enabled = !isLoadingModels) {
+                        Text("Back")
+                    }
+                }
+                3 -> {
+                    Text(
+                        "Select a Model",
+                        style = MaterialTheme.typography.headlineSmall,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        "Choose which Gemini model you'd like to use by default.",
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                    Spacer(modifier = Modifier.height(32.dp))
+                    
+                    var expanded by remember { mutableStateOf(false) }
+                    
+                    ExposedDropdownMenuBox(
+                        expanded = expanded,
+                        onExpandedChange = { expanded = !expanded }
+                    ) {
+                        val fillMaxWidth = Modifier.fillMaxWidth()
+                        OutlinedTextField(
+                            value = selectedModel?.displayName ?: "Select Model",
+                            onValueChange = {},
+                            readOnly = true,
+                            label = { Text("Model") },
+                            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
+                            modifier = Modifier.fillMaxWidth().menuAnchor()
+                        )
+                        ExposedDropdownMenu(
+                            expanded = expanded,
+                            onDismissRequest = { expanded = false }
+                        ) {
+                            availableModels.forEach { model ->
+                                DropdownMenuItem(
+                                    text = {
+                                        Column {
+                                            Text(model.displayName)
+                                            Text(model.description, style = MaterialTheme.typography.labelSmall)
+                                        }
+                                    },
+                                    onClick = {
+                                        selectedModel = model
+                                        expanded = false
+                                    }
+                                )
+                            }
+                        }
+                    }
+                    
+                    Spacer(modifier = Modifier.height(32.dp))
+                    Button(
+                        onClick = {
+                            scope.launch {
+                                settingsManager.saveGeminiApiKey(apiKey)
+                                selectedModel?.let { settingsManager.saveGeminiModel(it.name) }
+                                onSetupComplete()
+                            }
+                        },
+                        enabled = selectedModel != null,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("Finish Setup")
+                    }
+                    TextButton(onClick = { step = 2 }) {
+                        Text("Back")
+                    }
+                }
+            }
         }
     }
 }

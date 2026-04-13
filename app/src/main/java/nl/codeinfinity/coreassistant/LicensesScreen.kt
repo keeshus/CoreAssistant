@@ -8,6 +8,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -16,7 +17,7 @@ fun LicensesScreen(onBack: () -> Unit) {
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Licenses") },
+                title = { Text("Open Source Licenses") },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
@@ -28,230 +29,108 @@ fun LicensesScreen(onBack: () -> Unit) {
         Column(
             modifier = Modifier
                 .padding(padding)
-                .padding(16.dp)
                 .fillMaxSize()
-                .verticalScroll(rememberScrollState()),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
+                .verticalScroll(rememberScrollState())
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(24.dp)
         ) {
-            LicenseItem(
-                name = "CoreAssistant (This App)",
-                license = """
-                    MIT License
-
-                    Copyright (c) 2024 Kees Hus
-
-                    Permission is hereby granted, free of charge, to any person obtaining a copy
-                    of this software and associated documentation files (the "Software"), to deal
-                    in the Software without restriction, including without limitation the rights
-                    to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-                    copies of the Software, and to permit persons to whom the Software is
-                    furnished to do so, subject to the following conditions:
-
-                    The above copyright notice and this permission notice shall be included in all
-                    copies or substantial portions of the Software.
-
-                    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-                    IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-                    FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-                    AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-                    LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-                    OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-                    SOFTWARE.
-                """.trimIndent()
+            Text(
+                "CoreAssistant is made possible by the following open source projects:",
+                style = MaterialTheme.typography.bodyLarge
             )
 
-            HorizontalDivider()
-
-            LicenseItem(
-                name = "Android Jetpack Libraries",
-                license = """
-                    Apache License
-                    Version 2.0, January 2004
-                    http://www.apache.org/licenses/
-                """.trimIndent()
+            LicenseGroup(
+                title = "Core Application",
+                items = listOf(
+                    LicenseData(
+                        "CoreAssistant (MIT)",
+                        "Copyright (c) 2024 Kees Hus\n\nLicensed under the MIT License."
+                    ),
+                    LicenseData(
+                        "Android Jetpack Libraries",
+                        "Licensed under the Apache License, Version 2.0."
+                    )
+                )
             )
 
-            HorizontalDivider()
-
-            LicenseItem(
-                name = "Retrofit / OkHttp",
-                license = """
-                    Copyright 2013 Square, Inc.
-
-                    Licensed under the Apache License, Version 2.0 (the "License");
-                    you may not use this file except in compliance with the License.
-                    You may obtain a copy of the License at
-
-                       http://www.apache.org/licenses/LICENSE-2.0
-
-                    Unless required by applicable law or agreed to in writing, software
-                    distributed under the License is distributed on an "AS IS" BASIS,
-                    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, EXPRESS OR IMPLIED.
-                    See the License for the specific language governing permissions and
-                    limitations under the License.
-                """.trimIndent()
+            LicenseGroup(
+                title = "Networking & AI",
+                items = listOf(
+                    LicenseData(
+                        "Retrofit / OkHttp",
+                        "Copyright 2013 Square, Inc.\n\nLicensed under the Apache License, Version 2.0."
+                    ),
+                    LicenseData(
+                        "Google Gemini API",
+                        "Powered by Google Gemini."
+                    )
+                )
             )
 
-            HorizontalDivider()
-
-            LicenseItem(
-                name = "Coil",
-                license = """
-                    Copyright 2023 Coil Contributors
-
-                    Licensed under the Apache License, Version 2.0 (the "License");
-                    you may not use this file except in compliance with the License.
-                    You may obtain a copy of the License at
-
-                       http://www.apache.org/licenses/LICENSE-2.0
-
-                    Unless required by applicable law or agreed to in writing, software
-                    distributed under the License is distributed on an "AS IS" BASIS,
-                    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, EXPRESS OR IMPLIED.
-                    See the License for the specific language governing permissions and
-                    limitations under the License.
-                """.trimIndent()
+            LicenseGroup(
+                title = "UI & Rendering",
+                items = listOf(
+                    LicenseData(
+                        "Coil",
+                        "Copyright 2023 Coil Contributors\n\nLicensed under the Apache License, Version 2.0."
+                    ),
+                    LicenseData(
+                        "Multiplatform Markdown Renderer",
+                        "Copyright 2022 Mike Penz\n\nLicensed under the Apache License, Version 2.0."
+                    )
+                )
             )
 
-            HorizontalDivider()
-
-            LicenseItem(
-                name = "Multiplatform Markdown Renderer",
-                license = """
-                    Copyright 2022 Mike Penz
-
-                    Licensed under the Apache License, Version 2.0 (the "License");
-                    you may not use this file except in compliance with the License.
-                    You may obtain a copy of the License at
-
-                       http://www.apache.org/licenses/LICENSE-2.0
-
-                    Unless required by applicable law or agreed to in writing, software
-                    distributed under the License is distributed on an "AS IS" BASIS,
-                    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, EXPRESS OR IMPLIED.
-                    See the License for the specific language governing permissions and
-                    limitations under the License.
-                """.trimIndent()
+            LicenseGroup(
+                title = "Security & Data",
+                items = listOf(
+                    LicenseData(
+                        "SQLCipher / Zetetic",
+                        "Copyright (c) 2008-2024 Zetetic LLC\n\nLicensed under the BSD-style license."
+                    ),
+                    LicenseData(
+                        "Room Persistence Library",
+                        "Licensed under the Apache License, Version 2.0."
+                    )
+                )
             )
-
-            HorizontalDivider()
-
-            LicenseItem(
-                name = "SQLCipher / Android Database SQLCipher",
-                license = """
-                    Copyright (c) 2008-2024 Zetetic LLC
-                    All rights reserved.
-
-                    Redistribution and use in source and binary forms, with or without
-                    modification, are permitted provided that the following conditions are met:
-                        * Redistributions of source code must retain the above copyright
-                          notice, this list of conditions and the following disclaimer.
-                        * Redistributions in binary form must reproduce the above copyright
-                          notice, this list of conditions and the following disclaimer in the
-                          documentation and/or other materials provided with the distribution.
-                        * Neither the name of the ZETETIC LLC nor the
-                          names of its contributors may be used to endorse or promote products
-                          derived from this software without specific prior written permission.
-
-                    THIS SOFTWARE IS PROVIDED BY ZETETIC LLC ''AS IS'' AND ANY
-                    EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
-                    WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
-                    DISCLAIMED. IN NO EVENT SHALL ZETETIC LLC BE LIABLE FOR ANY
-                    DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
-                    (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
-                    LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
-                    ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-                    (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
-                    SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-                """.trimIndent()
-            )
-
-            HorizontalDivider()
-
-            LicenseItem(
-                name = "Sherpa-ONNX",
-                license = """
-                    Copyright (c) 2023 by k2-fsa
-                    
-                    Licensed under the Apache License, Version 2.0 (the "License");
-                    you may not use this file except in compliance with the License.
-                    You may obtain a copy of the License at
-
-                       http://www.apache.org/licenses/LICENSE-2.0
-
-                    Unless required by applicable law or agreed to in writing, software
-                    distributed under the License is distributed on an "AS IS" BASIS,
-                    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, EXPRESS OR IMPLIED.
-                    See the License for the specific language governing permissions and
-                    limitations under the License.
-                """.trimIndent()
-            )
-
-            HorizontalDivider()
-
-            LicenseItem(
-                name = "Apache Commons Compress",
-                license = """
-                    Copyright 2002-2024 The Apache Software Foundation
-
-                    Licensed under the Apache License, Version 2.0 (the "License");
-                    you may not use this file except in compliance with the License.
-                    You may obtain a copy of the License at
-
-                       http://www.apache.org/licenses/LICENSE-2.0
-
-                    Unless required by applicable law or agreed to in writing, software
-                    distributed under the License is distributed on an "AS IS" BASIS,
-                    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, EXPRESS OR IMPLIED.
-                    See the License for the specific language governing permissions and
-                    limitations under the License.
-                """.trimIndent()
-            )
-
-            HorizontalDivider()
-
-            LicenseItem(
-                name = "ONNX Runtime",
-                license = """
-                    MIT License
-
-                    Copyright (c) Microsoft Corporation
-
-                    Permission is hereby granted, free of charge, to any person obtaining a copy
-                    of this software and associated documentation files (the "Software"), to deal
-                    in the Software without restriction, including without limitation the rights
-                    to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-                    copies of the Software, and to permit persons to whom the Software is
-                    furnished to do so, subject to the following conditions:
-
-                    The above copyright notice and this permission notice shall be included in all
-                    copies or substantial portions of the Software.
-
-                    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-                    IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-                    FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-                    AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-                    LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-                    OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-                    SOFTWARE.
-                """.trimIndent()
-            )
+            
+            Spacer(modifier = Modifier.height(16.dp))
         }
     }
 }
 
+data class LicenseData(val name: String, val summary: String)
+
 @Composable
-fun LicenseItem(name: String, license: String) {
-    Column {
+fun LicenseGroup(title: String, items: List<LicenseData>) {
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text(
-            text = name,
+            text = title,
             style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.Bold,
             color = MaterialTheme.colorScheme.primary
         )
-        Spacer(modifier = Modifier.height(8.dp))
-        Text(
-            text = license,
-            style = MaterialTheme.typography.bodySmall
-        )
+        items.forEach { item ->
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+                )
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text(
+                        text = item.name,
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = item.summary,
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
+            }
+        }
     }
 }
