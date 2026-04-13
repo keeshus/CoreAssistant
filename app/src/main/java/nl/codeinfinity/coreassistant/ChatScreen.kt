@@ -33,6 +33,7 @@ import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.input.key.*
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.LocalUriHandler
@@ -759,11 +760,12 @@ fun MessageBubble(
         modifier = Modifier.fillMaxWidth(),
         horizontalAlignment = alignment
     ) {
+        val screenWidth = LocalConfiguration.current.screenWidthDp.dp
         Surface(
             shape = RoundedCornerShape(12.dp),
             color = containerColor,
             contentColor = contentColor,
-            modifier = Modifier.widthIn(max = 340.dp)
+            modifier = Modifier.widthIn(max = screenWidth * 0.8f)
         ) {
             Column(modifier = Modifier.padding(12.dp)) {
                 Text(
@@ -791,7 +793,9 @@ fun MessageBubble(
                         )
                     }
 
-                    Markdown(content = message.text)
+                    Box(modifier = Modifier.width(IntrinsicSize.Max)) {
+                        Markdown(content = message.text)
+                    }
                     
                     message.attachments?.let { attachments ->
                         attachments.forEach { attachment ->
@@ -826,7 +830,6 @@ fun AttachmentPreview(attachment: Attachment) {
             contentDescription = attachment.fileName,
             modifier = Modifier
                 .padding(top = 8.dp)
-                .fillMaxWidth()
                 .heightIn(max = 200.dp)
                 .clip(RoundedCornerShape(8.dp))
         )
@@ -834,7 +837,6 @@ fun AttachmentPreview(attachment: Attachment) {
         Row(
             modifier = Modifier
                 .padding(top = 8.dp)
-                .fillMaxWidth()
                 .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(8.dp))
                 .padding(8.dp),
             verticalAlignment = Alignment.CenterVertically
