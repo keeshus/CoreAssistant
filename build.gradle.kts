@@ -5,7 +5,7 @@ buildscript {
         gradlePluginPortal()
     }
     dependencies {
-        classpath("com.android.tools.build:gradle:8.13.2")
+        classpath("com.android.tools.build:gradle:9.1.1")
         classpath("org.jetbrains.kotlin:kotlin-gradle-plugin:2.3.20")
         classpath("org.jetbrains.kotlin:compose-compiler-gradle-plugin:2.3.20")
         classpath("com.google.devtools.ksp:com.google.devtools.ksp.gradle.plugin:2.3.6")
