@@ -793,9 +793,7 @@ fun MessageBubble(
                         )
                     }
 
-                    Box(modifier = Modifier.width(IntrinsicSize.Max)) {
-                        Markdown(content = message.text)
-                    }
+                    Markdown(content = message.text)
                     
                     message.attachments?.let { attachments ->
                         attachments.forEach { attachment ->
