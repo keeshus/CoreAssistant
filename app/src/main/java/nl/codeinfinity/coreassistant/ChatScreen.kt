@@ -801,7 +801,10 @@ fun MessageBubble(
                         }
                     }
 
-                    if (message.groundingMetadata != null) {
+                    val hasGroundingLinks = message.groundingMetadata != null && 
+                        (!message.groundingMetadata.groundingChunks.isNullOrEmpty() || message.groundingMetadata.searchEntryPoint?.html != null)
+
+                    if (hasGroundingLinks) {
                         Text(
                             text = "View Sources",
                             style = MaterialTheme.typography.bodySmall,
@@ -809,7 +812,7 @@ fun MessageBubble(
                             textDecoration = TextDecoration.Underline,
                             modifier = Modifier
                                 .padding(top = 8.dp)
-                                .clickable { onShowGrounding(message.groundingMetadata) }
+                                .clickable { onShowGrounding(message.groundingMetadata!!) }
                         )
                     }
                 }
