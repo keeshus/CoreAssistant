@@ -23,6 +23,7 @@ import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Description
+import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.Psychology
 import androidx.compose.material.icons.filled.Stop
@@ -35,8 +36,10 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.input.key.*
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.LocalUriHandler
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
@@ -397,6 +400,18 @@ class ChatViewModel(
         currentJob?.cancel()
         currentJob = null
         _loadingMessage.value = null
+        
+        lastUserMessageId?.let { id ->
+            viewModelScope.launch(Dispatchers.IO) {
+                chatDao.deleteMessageById(id)
+            }
+        }
+        
+        updateDraft(lastUserMessage)
+        _selectedAttachments.clear()
+        _selectedAttachments.addAll(lastAttachments)
+        
+        lastUserMessageId = null
     }
 
 }
@@ -761,6 +776,8 @@ fun MessageBubble(
         horizontalAlignment = alignment
     ) {
         val screenWidth = LocalConfiguration.current.screenWidthDp.dp
+        val clipboardManager = LocalClipboardManager.current
+        val context = LocalContext.current
         Surface(
             shape = RoundedCornerShape(12.dp),
             color = containerColor,
@@ -768,12 +785,33 @@ fun MessageBubble(
             modifier = Modifier.widthIn(max = screenWidth * 0.8f)
         ) {
             Column(modifier = Modifier.padding(12.dp)) {
-                Text(
-                    text = if (message.isUser) userName else "Gemini",
-                    style = MaterialTheme.typography.labelSmall,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier.padding(bottom = 4.dp)
-                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = if (message.isUser) userName else "Gemini",
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(bottom = 4.dp)
+                    )
+                    if (!message.isLoading) {
+                        IconButton(
+                            onClick = {
+                                clipboardManager.setText(AnnotatedString(message.text))
+                                android.widget.Toast.makeText(context, "Message copied", android.widget.Toast.LENGTH_SHORT).show()
+                            },
+                            modifier = Modifier.size(24.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.ContentCopy,
+                                contentDescription = "Copy message",
+                                modifier = Modifier.size(16.dp)
+                            )
+                        }
+                    }
+                }
                 
                 if (message.isLoading) {
                     CircularProgressIndicator(
@@ -812,7 +850,7 @@ fun MessageBubble(
                             textDecoration = TextDecoration.Underline,
                             modifier = Modifier
                                 .padding(top = 8.dp)
-                                .clickable { onShowGrounding(message.groundingMetadata!!) }
+                                .clickable { onShowGrounding(message.groundingMetadata) }
                         )
                     }
                 }

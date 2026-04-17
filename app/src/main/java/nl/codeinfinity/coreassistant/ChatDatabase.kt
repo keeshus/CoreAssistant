@@ -112,6 +112,12 @@ interface ChatDao {
 
     @Query("UPDATE conversations SET draftText = :draft, lastDraftUpdate = :timestamp WHERE id = :id")
     suspend fun updateDraft(id: Long, draft: String, timestamp: Long)
+
+    @Delete
+    suspend fun deleteMessage(message: MessageEntity)
+
+    @Query("DELETE FROM messages WHERE id = :id")
+    suspend fun deleteMessageById(id: Long)
 }
 
 @Entity(tableName = "gemini_models")
