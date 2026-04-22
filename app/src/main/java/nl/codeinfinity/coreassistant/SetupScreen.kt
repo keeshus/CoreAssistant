@@ -39,6 +39,7 @@ fun SetupScreen(
     // Step 3: Model Selection
     var availableModels by remember { mutableStateOf<List<GeminiModel>>(emptyList()) }
     var selectedModel by remember { mutableStateOf<GeminiModel?>(null) }
+    var selectedImageModel by remember { mutableStateOf<GeminiModel?>(null) }
     var isLoadingModels by remember { mutableStateOf(false) }
     var modelFetchError by remember { mutableStateOf<String?>(null) }
 
@@ -136,14 +137,13 @@ fun SetupScreen(
                                         apiService.getModels(apiKey)
                                     }
                                     val filteredModels = response.models.filter {
-                                        it.name.startsWith("models/") &&
-                                        (it.displayName.contains("Gemini", ignoreCase = true))
+                                        it.name.startsWith("models/")
                                     }
                                     
                                     if (filteredModels.isNotEmpty()) {
                                         withContext(Dispatchers.IO) {
                                             val entities = filteredModels.map {
-                                                GeminiModelEntity(it.name, it.displayName, it.description)
+                                                GeminiModelEntity(it.name, it.displayName ?: it.name, it.description ?: "No description available")
                                             }
                                             database.geminiModelDao().deleteAllModels()
                                             database.geminiModelDao().insertModels(entities)
@@ -151,6 +151,10 @@ fun SetupScreen(
                                         
                                         availableModels = filteredModels
                                         selectedModel = availableModels.firstOrNull { it.name.contains("gemini-1.5-flash") }
+                                            ?: availableModels.firstOrNull { it.displayName?.contains("Gemini", ignoreCase = true) == true }
+                                            ?: availableModels.first()
+                                        selectedImageModel = availableModels.firstOrNull { it.name.contains("imagen-3") }
+                                            ?: availableModels.firstOrNull { it.displayName?.contains("Imagen", ignoreCase = true) == true }
                                             ?: availableModels.first()
                                         step = 3
                                     } else {
@@ -182,13 +186,13 @@ fun SetupScreen(
                 }
                 3 -> {
                     Text(
-                        "Select a Model",
+                        "Select Default Models",
                         style = MaterialTheme.typography.headlineSmall,
                         fontWeight = FontWeight.Bold
                     )
                     Spacer(modifier = Modifier.height(8.dp))
                     Text(
-                        "Choose which Gemini model you'd like to use by default.",
+                        "Choose the default models for chat and image generation.",
                         style = MaterialTheme.typography.bodyMedium
                     )
                     Spacer(modifier = Modifier.height(32.dp))
@@ -199,12 +203,11 @@ fun SetupScreen(
                         expanded = expanded,
                         onExpandedChange = { expanded = !expanded }
                     ) {
-                        val fillMaxWidth = Modifier.fillMaxWidth()
                         OutlinedTextField(
-                            value = selectedModel?.displayName ?: "Select Model",
+                            value = selectedModel?.displayName ?: "Select Chat Model",
                             onValueChange = {},
                             readOnly = true,
-                            label = { Text("Model") },
+                            label = { Text("Chat Model") },
                             trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
                             modifier = Modifier.fillMaxWidth().menuAnchor()
                         )
@@ -216,13 +219,50 @@ fun SetupScreen(
                                 DropdownMenuItem(
                                     text = {
                                         Column {
-                                            Text(model.displayName)
-                                            Text(model.description, style = MaterialTheme.typography.labelSmall)
+                                            Text(model.displayName ?: model.name)
+                                            Text(model.description ?: "No description available", style = MaterialTheme.typography.labelSmall)
                                         }
                                     },
                                     onClick = {
                                         selectedModel = model
                                         expanded = false
+                                    }
+                                )
+                            }
+                        }
+                    }
+                    
+                    Spacer(modifier = Modifier.height(16.dp))
+                    
+                    var expandedImage by remember { mutableStateOf(false) }
+                    
+                    ExposedDropdownMenuBox(
+                        expanded = expandedImage,
+                        onExpandedChange = { expandedImage = !expandedImage }
+                    ) {
+                        OutlinedTextField(
+                            value = selectedImageModel?.displayName ?: "Select Image Model",
+                            onValueChange = {},
+                            readOnly = true,
+                            label = { Text("Image Generation Model") },
+                            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expandedImage) },
+                            modifier = Modifier.fillMaxWidth().menuAnchor()
+                        )
+                        ExposedDropdownMenu(
+                            expanded = expandedImage,
+                            onDismissRequest = { expandedImage = false }
+                        ) {
+                            availableModels.forEach { model ->
+                                DropdownMenuItem(
+                                    text = {
+                                        Column {
+                                            Text(model.displayName ?: model.name)
+                                            Text(model.description ?: "No description available", style = MaterialTheme.typography.labelSmall)
+                                        }
+                                    },
+                                    onClick = {
+                                        selectedImageModel = model
+                                        expandedImage = false
                                     }
                                 )
                             }
@@ -235,10 +275,11 @@ fun SetupScreen(
                             scope.launch {
                                 settingsManager.saveGeminiApiKey(apiKey)
                                 selectedModel?.let { settingsManager.saveGeminiModel(it.name) }
+                                selectedImageModel?.let { settingsManager.saveImageGenerationModel(it.name) }
                                 onSetupComplete()
                             }
                         },
-                        enabled = selectedModel != null,
+                        enabled = selectedModel != null && selectedImageModel != null,
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Text("Finish Setup")

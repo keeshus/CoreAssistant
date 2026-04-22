@@ -1,9 +1,7 @@
 package nl.codeinfinity.coreassistant
 
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
@@ -17,6 +15,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
@@ -35,7 +34,7 @@ class ConversationListViewModel(private val chatDao: ChatDao, private val settin
         viewModelScope.launch {
             val limit = settingsManager.conversationsLimit.first()
             chatDao.deleteOldConversations(limit - 1) // Make room for new one if needed
-            val title = if (isImageGeneration) "Nano Banana Chat" else "New Chat"
+            val title = if (isImageGeneration) "Image Generation" else "New Chat"
             val id = chatDao.createNewConversation(title, isImageGeneration)
             onConversationCreated(id)
         }
@@ -109,7 +108,7 @@ fun ConversationListScreen(
                     containerColor = MaterialTheme.colorScheme.secondaryContainer,
                     contentColor = MaterialTheme.colorScheme.onSecondaryContainer
                 ) {
-                    Icon(Icons.Default.AutoAwesome, contentDescription = "Nano Banana")
+                    Icon(Icons.Default.AutoAwesome, contentDescription = "Image Generation")
                 }
                 
                 Spacer(modifier = Modifier.height(16.dp))

@@ -45,6 +45,8 @@ interface GeminiApiService {
                 .build()
                 .create(GeminiApiService::class.java)
         }
+        
+        // Ensure OkHttp Logging interceptor dependency is added to app/build.gradle.kts later if needed.
     }
 }
 
@@ -58,7 +60,8 @@ data class GenerateContentRequest(
 
 data class GenerationConfig(
     @SerializedName("include_thoughts") val includeThoughts: Boolean? = null,
-    @SerializedName("thinking_config") val thinkingConfig: ThinkingConfig? = null
+    @SerializedName("thinking_config") val thinkingConfig: ThinkingConfig? = null,
+    @SerializedName("response_modalities") val responseModalities: List<String>? = null
 )
 
 data class ThinkingConfig(
@@ -74,8 +77,21 @@ data class Content(
 data class Part(
     @SerializedName("text") val text: String? = null,
     @SerializedName("thought") val thought: Boolean? = null,
-    @SerializedName("inline_data") val inlineData: InlineData? = null,
-    @SerializedName("file_data") val fileData: FileData? = null
+    @SerializedName("inlineData") val inlineData: InlineData? = null,
+    @SerializedName("fileData") val fileData: FileData? = null,
+    @SerializedName("executable_code", alternate = ["executableCode"]) val executableCode: ExecutableCode? = null,
+    @SerializedName("code_execution_result", alternate = ["codeExecutionResult"]) val codeExecutionResult: CodeExecutionResult? = null,
+    @SerializedName("thought_signature", alternate = ["thoughtSignature"]) val thoughtSignature: String? = null
+)
+
+data class ExecutableCode(
+    val language: String? = null,
+    val code: String? = null
+)
+
+data class CodeExecutionResult(
+    val outcome: String? = null,
+    val output: String? = null
 )
 
 data class InlineData(
@@ -123,7 +139,10 @@ data class GenerateContentResponse(
         get() = candidates?.firstOrNull()?.content?.parts?.find { it.thought == true && it.text != null }?.text
 
     val inlineImages: List<InlineData>?
-        get() = candidates?.firstOrNull()?.content?.parts?.filter { it.inlineData != null }?.map { it.inlineData!! }
+        get() = candidates?.flatMap { it.content?.parts ?: emptyList() }
+            ?.filter { it.inlineData != null || it.fileData != null }
+            ?.mapNotNull { it.inlineData ?: it.fileData?.let { fd -> InlineData(mimeType = fd.mimeType, data = fd.fileUri) } }
+            ?.takeIf { it.isNotEmpty() }
         
     val groundingMetadata: GroundingMetadata?
         get() = candidates?.firstOrNull()?.groundingMetadata
@@ -190,6 +209,6 @@ data class GeminiModelsResponse(
 
 data class GeminiModel(
     val name: String,
-    val displayName: String,
-    val description: String
+    val displayName: String? = null,
+    val description: String? = null
 )

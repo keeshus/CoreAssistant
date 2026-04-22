@@ -1,6 +1,7 @@
 package nl.codeinfinity.coreassistant
 
 import android.content.Context
+import android.graphics.Color
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.provider.OpenableColumns
@@ -31,6 +32,8 @@ import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.graphics.Color as ComposeColor
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -46,6 +49,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.core.net.toUri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
@@ -72,6 +77,7 @@ data class ChatMessage(
     val text: String,
     val isUser: Boolean,
     val thought: String? = null,
+    val thoughtSignature: String? = null,
     val groundingMetadata: GroundingMetadata? = null,
     val attachments: List<Attachment>? = null,
     val isLoading: Boolean = false
@@ -100,6 +106,7 @@ class ChatViewModel(
                     text = entity.text,
                     isUser = entity.isUser,
                     thought = entity.thought,
+                    thoughtSignature = entity.thoughtSignature,
                     groundingMetadata = entity.groundingMetadata,
                     attachments = entity.attachments
                 )
@@ -112,36 +119,21 @@ class ChatViewModel(
 
     private val apiService = GeminiApiService.create()
 
-    private var currentJob: Job? = null
-    var lastUserMessage: String = ""
-        private set
-    var lastAttachments: List<Attachment> = emptyList()
-        private set
-    private var lastUserMessageId: Long? = null
-
     private val _selectedAttachments = mutableStateListOf<Attachment>()
     val selectedAttachments: List<Attachment> get() = _selectedAttachments
 
-    private val _draftText = MutableStateFlow("")
-    val draftText: StateFlow<String> = _draftText.asStateFlow()
+    val draftText: StateFlow<String> = chatDao.getConversationByIdFlow(conversationId)
+        .map { it?.draftText ?: "" }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "")
 
-    init {
-        viewModelScope.launch {
-            val conv = withContext(Dispatchers.IO) {
-                chatDao.getConversationById(conversationId)
-            }
-            conv?.draftText?.let {
-                _draftText.value = it
-            }
-        }
-    }
+    private var lastUserMessage: String = ""
+    private var lastAttachments: List<Attachment> = emptyList()
+    private var lastUserMessageId: Long? = null
+    private var currentJob: Job? = null
 
     fun updateDraft(text: String) {
-        _draftText.value = text
-        viewModelScope.launch {
-            withContext(Dispatchers.IO) {
-                chatDao.updateDraft(conversationId, text, System.currentTimeMillis())
-            }
+        viewModelScope.launch(Dispatchers.IO) {
+            chatDao.updateDraft(conversationId, text, System.currentTimeMillis())
         }
     }
 
@@ -187,11 +179,17 @@ class ChatViewModel(
             // Inline data
             val bytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: return null
             val base64Data = Base64.encodeToString(bytes, Base64.NO_WRAP)
-            GeminiPart(inlineData = InlineData(mimeType = mimeType, data = base64Data))
+            GeminiPart(
+                inlineData = InlineData(mimeType = mimeType, data = base64Data),
+                thoughtSignature = attachment.thoughtSignature
+            )
         } else {
             // File API
             val remoteUri = attachment.remoteUri ?: uploadToFileApi(attachment, apiKey) ?: return null
-            GeminiPart(fileData = FileData(mimeType = mimeType, fileUri = remoteUri))
+            GeminiPart(
+                fileData = FileData(mimeType = mimeType, fileUri = remoteUri),
+                thoughtSignature = attachment.thoughtSignature
+            )
         }
     }
 
@@ -326,46 +324,69 @@ class ChatViewModel(
                 val contents = historyEntities.mapIndexed { index, msg ->
                     val parts = mutableListOf<GeminiPart>()
                     
-                    if (msg.text.isNotBlank()) {
-                        parts.add(GeminiPart(text = msg.text))
+                    android.util.Log.d("GeminiAPI", "Reconstructing Content $index (isUser=${msg.isUser})")
+
+                    // Include thinking process in history
+                    if (msg.thought != null) {
+                        parts.add(GeminiPart(text = msg.thought))
+                        android.util.Log.d("GeminiAPI", "  Added thought part")
                     }
                     
-                    msg.attachments?.forEach { attachment ->
-                        if (index == historyEntities.lastIndex && msg.isUser) {
-                            val part = prepareAttachmentPart(attachment, apiKey)
+                    val hasAttachments = !msg.attachments.isNullOrEmpty()
+                    val isLastUserMessage = index == historyEntities.lastIndex && msg.isUser
+
+                    // If it's the current user message, put attachments FIRST to act as base images
+                    if (isLastUserMessage) {
+                        msg.attachments?.forEach { attachment ->
+                            val sigToUse = attachment.thoughtSignature
+                            val part = prepareAttachmentPart(attachment.copy(thoughtSignature = sigToUse), apiKey)
                             if (part != null) {
                                 parts.add(part)
-                                if (part.fileData != null && attachment.remoteUri == null) {
-                                    val updatedAttachment = attachment.copy(remoteUri = part.fileData.fileUri)
-                                    val updatedAttachments = msg.attachments.map {
-                                        if (it.uri == attachment.uri) updatedAttachment else it
-                                    }
-                                    withContext(Dispatchers.IO) {
-                                        val history = chatDao.getMessagesForConversationSync(conversationId)
-                                        val entityToUpdate = history.getOrNull(index)
-                                        if (entityToUpdate != null) {
-                                            chatDao.insertMessage(entityToUpdate.copy(attachments = updatedAttachments))
-                                        }
-                                    }
-                                }
-                            } else {
-                                throw Exception("Failed to process attachment: ${attachment.fileName}")
+                                android.util.Log.d("GeminiAPI", "  Added current user attachment part FIRST (hasSig=${part.thoughtSignature != null})")
                             }
-                        } else if (attachment.remoteUri != null) {
-                            parts.add(GeminiPart(fileData = FileData(mimeType = attachment.mimeType, fileUri = attachment.remoteUri)))
-                        } else if (attachment.fileSize < 20 * 1024 * 1024) {
-                            // In image generation mode, we also want to send previous images as context
-                            // Even if they don't have a remoteUri yet, we can try to prepare them
-                            val part = prepareAttachmentPart(attachment, apiKey)
-                            if (part != null) parts.add(part)
                         }
+                    }
+                    
+                    if (msg.text.isNotBlank()) {
+                        // If there are attachments in a model turn, the signature belongs to the last attachment.
+                        // For user turns, the signature is on the attachment itself.
+                        val textSig = if (!hasAttachments && !msg.isUser) msg.thoughtSignature else null
+                        parts.add(GeminiPart(text = msg.text, thoughtSignature = textSig))
+                        android.util.Log.d("GeminiAPI", "  Added text part (hasSig=${textSig != null})")
+                    }
+                    
+                    // Historical attachments (not the current user message)
+                    if (!isLastUserMessage) {
+                        msg.attachments?.forEachIndexed { attIndex, attachment ->
+                            val isLastAttachment = attIndex == msg.attachments.lastIndex
+                            val sigToUse = attachment.thoughtSignature ?: if (!msg.isUser && isLastAttachment) msg.thoughtSignature else null
+                            
+                            if (attachment.remoteUri != null) {
+                                parts.add(GeminiPart(
+                                    fileData = FileData(mimeType = attachment.mimeType, fileUri = attachment.remoteUri),
+                                    thoughtSignature = sigToUse
+                                ))
+                            } else if (attachment.fileSize < 20 * 1024 * 1024) {
+                                val part = prepareAttachmentPart(attachment.copy(thoughtSignature = sigToUse), apiKey)
+                                if (part != null) parts.add(part)
+                            }
+                        }
+                    }
+                    
+                    if (parts.isEmpty() && !msg.isUser && msg.thoughtSignature != null) {
+                        parts.add(GeminiPart(text = "", thoughtSignature = msg.thoughtSignature))
                     }
 
                     Content(role = if (msg.isUser) "user" else "model", parts = parts.toList())
                 }
 
+
                 val thinkingLevel = settingsManager.geminiThinkingLevel.first()
-                val configuration = if (thinkingLevel != "OFF") {
+                val configuration = if (_isImageGeneration.value) {
+                    GenerationConfig(
+                        responseModalities = listOf("IMAGE")
+                    )
+                } else if (thinkingLevel != "OFF") {
                     GenerationConfig(
                         thinkingConfig = ThinkingConfig(
                             includeThoughts = true,
@@ -378,38 +399,73 @@ class ChatViewModel(
                 
                 val request = GenerateContentRequest(
                     contents = contents,
-                    tools = tools,
+                    tools = if (_isImageGeneration.value) null else tools,
                     generationConfig = configuration,
                     systemInstruction = if (_isImageGeneration.value) {
-                        Content(parts = listOf(GeminiPart(text = "You are Nano Banana, an expert image generation assistant. Your primary goal is to generate high-quality images based on user descriptions. You can iterate on previous images if the user asks for changes. Always try to be creative and descriptive.")))
+                        Content(parts = listOf(GeminiPart(text = "You are an expert image generation assistant. Your primary goal is to generate high-quality images based on user descriptions. When a user provides an image in their message, you must use it as the base for any requested changes, maintaining the composition, style, and subject unless instructed otherwise. Always try to be creative and descriptive.")))
                     } else {
                         systemInstruction?.let { Content(parts = listOf(GeminiPart(text = it))) }
                     }
                 )
+                
                 val response = apiService.generateContent(model = modelName, apiKey = apiKey, request = request)
+
+                // Log response parts for debugging
+                response.candidates?.firstOrNull()?.content?.parts?.forEachIndexed { i, part ->
+                    android.util.Log.d("GeminiAPI", "Response Part $i: hasText=${part.text != null}, hasImage=${part.inlineData != null || part.fileData != null}, hasSig=${part.thoughtSignature != null}")
+                    if (part.thoughtSignature != null) {
+                        android.util.Log.d("GeminiAPI", "Part $i Signature: ${part.thoughtSignature.take(20)}...")
+                    }
+                }
 
                 val responseText = response.text
                 val responseThought = response.thought
+                
+                // Get the signature from any part (usually the last one)
+                val responseSignature = response.candidates?.firstOrNull()?.content?.parts?.lastOrNull { it.thoughtSignature != null }?.thoughtSignature
+                
                 val groundingMetadata = response.groundingMetadata
                 val inlineImages = response.inlineImages
-                
+
                 if (responseText == null && inlineImages.isNullOrEmpty()) {
                     val blockReason = response.candidates?.firstOrNull()?.finishReason 
                         ?: response.promptFeedback?.blockReason
                     
-                    val errorMessage = when (blockReason) {
-                        "SAFETY" -> "Error: Response blocked by safety filters."
-                        "RECITATION" -> "Error: Response blocked due to content recitation."
-                        "OTHER" -> "Error: Response blocked for other reasons."
-                        else -> "Error: Received an empty response from the API."
+                    if (blockReason != null && blockReason != "STOP") {
+                        val errorMessage = when (blockReason) {
+                            "SAFETY" -> "Error: Response blocked by safety filters."
+                            "RECITATION" -> "Error: Response blocked due to content recitation."
+                            "OTHER" -> "Error: Response blocked for other reasons."
+                            else -> "Error: Received an empty response from the API ($blockReason)."
+                        }
+                        _loadingMessage.value = ChatMessage(errorMessage, isUser = false)
+                        return@launch
+                    } else if (responseThought == null) {
+                        // If no text, no image, no thought, and not blocked, THEN it's an actual empty response
+                        _loadingMessage.value = ChatMessage("Error: Received an empty response from the API.", isUser = false)
+                        return@launch
                     }
-                    _loadingMessage.value = ChatMessage(errorMessage, isUser = false)
-                    return@launch
                 }
                 
-                val responseAttachments = inlineImages?.mapNotNull { 
-                    saveBase64Image(it.data, it.mimeType)
+                val responseAttachments = response.candidates?.firstOrNull()?.content?.parts?.mapNotNull { part ->
+                    if (part.inlineData != null) {
+                        saveBase64Image(part.inlineData.data, part.inlineData.mimeType)?.copy(
+                            thoughtSignature = part.thoughtSignature
+                        )
+                    } else if (part.fileData != null) {
+                        Attachment(
+                            uri = part.fileData.fileUri,
+                            mimeType = part.fileData.mimeType,
+                            fileName = "remote_image",
+                            fileSize = 0,
+                            remoteUri = part.fileData.fileUri,
+                            thoughtSignature = part.thoughtSignature
+                        )
+                    } else {
+                        null
+                    }
                 }
+
                 
                 withContext(Dispatchers.IO) {
                     chatDao.insertMessage(
@@ -418,11 +474,13 @@ class ChatViewModel(
                             text = responseText ?: "",
                             isUser = false,
                             thought = responseThought,
+                            thoughtSignature = responseSignature,
                             groundingMetadata = groundingMetadata,
                             attachments = responseAttachments
                         )
                     )
                 }
+
                 _loadingMessage.value = null
             } catch (_: kotlinx.coroutines.CancellationException) {
             } catch (e: retrofit2.HttpException) {
@@ -534,6 +592,8 @@ fun ChatScreen(
     var showThoughtSheet by remember { mutableStateOf(false) }
     var selectedThought by remember { mutableStateOf<String?>(null) }
 
+    var fullscreenImageUri by remember { mutableStateOf<String?>(null) }
+
     LocalSoftwareKeyboardController.current
 
     LaunchedEffect(messages.size, loadingMessage) {
@@ -576,10 +636,12 @@ fun ChatScreen(
             TopAppBar(
                 title = { 
                     Column {
-                        Text(if (isImageGeneration) "Nano Banana" else "Chat")
-                        if (isImageGeneration) {
-                            Text("Image Generation Mode", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.secondary)
-                        }
+                        Text(if (isImageGeneration) "Image Generation" else "Chat")
+                        Text(
+                            if (isImageGeneration) "Image Generation Mode" else "Text Conversation Mode",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.secondary
+                        )
                     }
                 },
                 navigationIcon = {
@@ -610,24 +672,33 @@ fun ChatScreen(
                     reverseLayout = true,
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                loadingMessage?.let {
-                    item { MessageBubble(it, userName) }
-                }
-                items(messages.asReversed()) { message ->
-                    MessageBubble(
-                        message = message,
-                        userName = userName,
-                        onShowGrounding = {
-                            selectedGroundingMetadata = it
-                            showGroundingSheet = true
-                        },
-                        onShowThought = {
-                            selectedThought = it
-                            showThoughtSheet = true
+                    loadingMessage?.let {
+                        item {
+                            MessageBubble(
+                                message = it,
+                                userName = userName,
+                                onImageClick = { fullscreenImageUri = it }
+                            )
                         }
-                    )
+                    }
+                    items(messages.asReversed()) { message ->
+                        MessageBubble(
+                            message = message,
+                            userName = userName,
+                            onShowGrounding = {
+                                selectedGroundingMetadata = it
+                                showGroundingSheet = true
+                            },
+                            onShowThought = {
+                                selectedThought = it
+                                showThoughtSheet = true
+                            },
+                            onImageClick = {
+                                fullscreenImageUri = it
+                            }
+                        )
+                    }
                 }
-            }
             
             if (viewModel.selectedAttachments.isNotEmpty()) {
                 LazyRow(
@@ -722,6 +793,80 @@ fun ChatScreen(
             sheetState = sheetState
         ) {
             ThoughtContent(selectedThought!!)
+        }
+    }
+
+    if (fullscreenImageUri != null) {
+        FullscreenImageDialog(
+            uri = fullscreenImageUri!!,
+            onDismiss = { fullscreenImageUri = null },
+            onUseAsPrompt = {
+                val attachment = messages.flatMap { it.attachments ?: emptyList() }.find { it.uri == fullscreenImageUri }
+                if (attachment != null) {
+                    android.util.Log.d("GeminiAPI", "Use as prompt: attachment found, hasSig=${attachment.thoughtSignature != null}")
+                    viewModel.addAttachments(listOf(attachment))
+                }
+                fullscreenImageUri = null
+            }
+        )
+    }
+}
+
+@Composable
+fun FullscreenImageDialog(
+    uri: String,
+    onDismiss: () -> Unit,
+    onUseAsPrompt: () -> Unit
+) {
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(
+            usePlatformDefaultWidth = false,
+            decorFitsSystemWindows = false
+        )
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(ComposeColor.Black)
+                .clickable { onDismiss() },
+            contentAlignment = Alignment.Center
+        ) {
+            AsyncImage(
+                model = uri,
+                contentDescription = "Fullscreen Image",
+                modifier = Modifier.fillMaxSize()
+            )
+
+            Row(
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(top = 48.dp, end = 16.dp)
+            ) {
+                IconButton(
+                    onClick = onUseAsPrompt,
+                    modifier = Modifier
+                        .background(ComposeColor.Black.copy(alpha = 0.5f), RoundedCornerShape(24.dp))
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Add,
+                        contentDescription = "Use as Prompt",
+                        tint = ComposeColor.White
+                    )
+                }
+                Spacer(modifier = Modifier.width(8.dp))
+                IconButton(
+                    onClick = onDismiss,
+                    modifier = Modifier
+                        .background(ComposeColor.Black.copy(alpha = 0.5f), RoundedCornerShape(24.dp))
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Close,
+                        contentDescription = "Close",
+                        tint = ComposeColor.White
+                    )
+                }
+            }
         }
     }
 }
@@ -866,7 +1011,8 @@ fun MessageBubble(
     message: ChatMessage,
     userName: String,
     onShowGrounding: (GroundingMetadata) -> Unit = {},
-    onShowThought: (String) -> Unit = {}
+    onShowThought: (String) -> Unit = {},
+    onImageClick: (String) -> Unit = {}
 ) {
     val alignment = if (message.isUser) Alignment.End else Alignment.Start
     val containerColor = if (message.isUser) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.secondaryContainer
@@ -936,7 +1082,10 @@ fun MessageBubble(
                     
                     message.attachments?.let { attachments ->
                         attachments.forEach { attachment ->
-                            AttachmentPreview(attachment)
+                            AttachmentPreview(
+                                attachment = attachment,
+                                onImageClick = onImageClick
+                            )
                         }
                     }
 
@@ -961,7 +1110,10 @@ fun MessageBubble(
 }
 
 @Composable
-fun AttachmentPreview(attachment: Attachment) {
+fun AttachmentPreview(
+    attachment: Attachment,
+    onImageClick: (String) -> Unit = {}
+) {
     val isImage = attachment.mimeType.startsWith("image/")
     val context = LocalContext.current
     
@@ -973,6 +1125,7 @@ fun AttachmentPreview(attachment: Attachment) {
                 modifier = Modifier
                     .heightIn(max = 240.dp)
                     .clip(RoundedCornerShape(8.dp))
+                    .clickable { onImageClick(attachment.uri) }
             )
             
             Row(

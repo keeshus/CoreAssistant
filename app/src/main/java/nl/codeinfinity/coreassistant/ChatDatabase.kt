@@ -25,7 +25,8 @@ data class Attachment(
     val mimeType: String,
     val fileName: String,
     val fileSize: Long,
-    val remoteUri: String? = null // Gemini File API URI if uploaded
+    val remoteUri: String? = null, // Gemini File API URI if uploaded
+    val thoughtSignature: String? = null
 )
 
 @Entity(
@@ -46,6 +47,7 @@ data class MessageEntity(
     val text: String,
     val isUser: Boolean,
     val thought: String? = null,
+    val thoughtSignature: String? = null,
     val groundingMetadata: GroundingMetadata? = null,
     val attachments: List<Attachment>? = null,
     val timestamp: Long = System.currentTimeMillis()
@@ -93,6 +95,9 @@ interface ChatDao {
 
     @Query("SELECT * FROM conversations WHERE id = :id")
     suspend fun getConversationById(id: Long): Conversation?
+
+    @Query("SELECT * FROM conversations WHERE id = :id")
+    fun getConversationByIdFlow(id: Long): Flow<Conversation?>
 
     @Query("SELECT * FROM messages WHERE conversationId = :conversationId ORDER BY timestamp ASC")
     fun getMessagesForConversation(conversationId: Long): Flow<List<MessageEntity>>

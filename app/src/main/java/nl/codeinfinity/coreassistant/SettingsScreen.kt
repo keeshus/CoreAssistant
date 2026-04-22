@@ -77,14 +77,13 @@ class SettingsViewModel(
                         apiService.getModels(key)
                     }
                     val filteredModels = response.models.filter {
-                        it.name.startsWith("models/") &&
-                        (it.displayName.contains("Gemini", ignoreCase = true))
+                        it.name.startsWith("models/")
                     }
                     
                     if (filteredModels.isNotEmpty()) {
                         withContext(Dispatchers.IO) {
                             val entities = filteredModels.map {
-                                GeminiModelEntity(it.name, it.displayName, it.description)
+                                GeminiModelEntity(it.name, it.displayName ?: it.name, it.description ?: "No description available")
                             }
                             database.geminiModelDao().deleteAllModels()
                             database.geminiModelDao().insertModels(entities)
@@ -280,7 +279,7 @@ fun SettingsScreen(
                 ) {
                     availableModels.forEach { model ->
                         DropdownMenuItem(
-                            text = { Text(model.displayName) },
+                            text = { Text(model.displayName ?: model.name) },
                             onClick = {
                                 viewModel.saveModel(model.name)
                                 expanded = false
@@ -296,7 +295,7 @@ fun SettingsScreen(
                         ?: imageGenerationModel.removePrefix("models/").split("-").joinToString(" ") { it.replaceFirstChar { c -> c.uppercase() } },
                     onValueChange = { },
                     readOnly = true,
-                    label = { Text("Image Generation Model (Nano Banana)") },
+                    label = { Text("Image Generation Model") },
                     modifier = Modifier.fillMaxWidth(),
                     trailingIcon = {
                         IconButton(onClick = { imageExpanded = true }) {
@@ -311,7 +310,7 @@ fun SettingsScreen(
                 ) {
                     availableModels.forEach { model ->
                         DropdownMenuItem(
-                            text = { Text(model.displayName) },
+                            text = { Text(model.displayName ?: model.name) },
                             onClick = {
                                 viewModel.saveImageModel(model.name)
                                 imageExpanded = false
