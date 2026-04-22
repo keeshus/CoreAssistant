@@ -8,6 +8,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
@@ -30,11 +31,12 @@ class ConversationListViewModel(private val chatDao: ChatDao, private val settin
     val conversations: StateFlow<List<Conversation>> = chatDao.getAllConversations()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
-    fun startNewConversation(onConversationCreated: (Long) -> Unit) {
+    fun startNewConversation(isImageGeneration: Boolean = false, onConversationCreated: (Long) -> Unit) {
         viewModelScope.launch {
             val limit = settingsManager.conversationsLimit.first()
             chatDao.deleteOldConversations(limit - 1) // Make room for new one if needed
-            val id = chatDao.createNewConversation("New Chat")
+            val title = if (isImageGeneration) "Nano Banana Chat" else "New Chat"
+            val id = chatDao.createNewConversation(title, isImageGeneration)
             onConversationCreated(id)
         }
     }
@@ -97,12 +99,28 @@ fun ConversationListScreen(
             )
         },
         floatingActionButton = {
-            FloatingActionButton(onClick = {
-                viewModel.startNewConversation { id ->
-                    onConversationClick(id)
+            Column(horizontalAlignment = Alignment.End) {
+                SmallFloatingActionButton(
+                    onClick = {
+                        viewModel.startNewConversation(isImageGeneration = true) { id ->
+                            onConversationClick(id)
+                        }
+                    },
+                    containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                    contentColor = MaterialTheme.colorScheme.onSecondaryContainer
+                ) {
+                    Icon(Icons.Default.AutoAwesome, contentDescription = "Nano Banana")
                 }
-            }) {
-                Icon(Icons.Default.Add, contentDescription = "New Chat")
+                
+                Spacer(modifier = Modifier.height(16.dp))
+                
+                FloatingActionButton(onClick = {
+                    viewModel.startNewConversation(isImageGeneration = false) { id ->
+                        onConversationClick(id)
+                    }
+                }) {
+                    Icon(Icons.Default.Add, contentDescription = "New Chat")
+                }
             }
         }
     ) { padding ->

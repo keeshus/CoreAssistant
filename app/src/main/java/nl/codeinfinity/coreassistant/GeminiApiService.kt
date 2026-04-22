@@ -117,10 +117,13 @@ data class GenerateContentResponse(
     val error: GeminiError? = null
 ) {
     val text: String?
-        get() = candidates?.firstOrNull()?.content?.parts?.find { (it.thought == null || it.thought == false) && it.text != null }?.text
+        get() = candidates?.firstOrNull()?.content?.parts?.filter { (it.thought == null || it.thought == false) && it.text != null }?.takeIf { it.isNotEmpty() }?.joinToString("\n") { it.text!! }
         
     val thought: String?
         get() = candidates?.firstOrNull()?.content?.parts?.find { it.thought == true && it.text != null }?.text
+
+    val inlineImages: List<InlineData>?
+        get() = candidates?.firstOrNull()?.content?.parts?.filter { it.inlineData != null }?.map { it.inlineData!! }
         
     val groundingMetadata: GroundingMetadata?
         get() = candidates?.firstOrNull()?.groundingMetadata

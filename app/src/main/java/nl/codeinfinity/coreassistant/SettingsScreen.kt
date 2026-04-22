@@ -38,6 +38,9 @@ class SettingsViewModel(
     val selectedModel: StateFlow<String> = settingsManager.geminiModel
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "models/gemini-3.0-flash-preview")
 
+    val imageGenerationModel: StateFlow<String> = settingsManager.imageGenerationModel
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "models/imagen-3.0-generate-001")
+
     val groundingEnabled: StateFlow<Boolean> = settingsManager.googleGroundingEnabled
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
 
@@ -106,6 +109,12 @@ class SettingsViewModel(
         }
     }
 
+    fun saveImageModel(model: String) {
+        viewModelScope.launch {
+            settingsManager.saveImageGenerationModel(model)
+        }
+    }
+
     fun saveGrounding(enabled: Boolean) {
         viewModelScope.launch {
             settingsManager.saveGoogleGroundingEnabled(enabled)
@@ -162,6 +171,7 @@ fun SettingsScreen(
     val apiKeyPref by viewModel.apiKey.collectAsState()
     val userNamePref by settingsManager.userName.collectAsState(initial = "User")
     val selectedModel by viewModel.selectedModel.collectAsState()
+    val imageGenerationModel by viewModel.imageGenerationModel.collectAsState()
     val groundingEnabled by viewModel.groundingEnabled.collectAsState()
     val conversationsLimitPref by viewModel.conversationsLimit.collectAsState()
     val thinkingLevel by viewModel.thinkingLevel.collectAsState()
@@ -186,6 +196,7 @@ fun SettingsScreen(
     }
 
     var expanded by remember { mutableStateOf(false) }
+    var imageExpanded by remember { mutableStateOf(false) }
     var thinkingExpanded by remember { mutableStateOf(false) }
     var apiKeyVisible by remember { mutableStateOf(false) }
 
@@ -273,6 +284,37 @@ fun SettingsScreen(
                             onClick = {
                                 viewModel.saveModel(model.name)
                                 expanded = false
+                            }
+                        )
+                    }
+                }
+            }
+
+            Box(modifier = Modifier.fillMaxWidth()) {
+                OutlinedTextField(
+                    value = availableModels.find { it.name == imageGenerationModel }?.displayName
+                        ?: imageGenerationModel.removePrefix("models/").split("-").joinToString(" ") { it.replaceFirstChar { c -> c.uppercase() } },
+                    onValueChange = { },
+                    readOnly = true,
+                    label = { Text("Image Generation Model (Nano Banana)") },
+                    modifier = Modifier.fillMaxWidth(),
+                    trailingIcon = {
+                        IconButton(onClick = { imageExpanded = true }) {
+                            Icon(Icons.Default.ArrowDropDown, contentDescription = null)
+                        }
+                    }
+                )
+                DropdownMenu(
+                    expanded = imageExpanded,
+                    onDismissRequest = { imageExpanded = false },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    availableModels.forEach { model ->
+                        DropdownMenuItem(
+                            text = { Text(model.displayName) },
+                            onClick = {
+                                viewModel.saveImageModel(model.name)
+                                imageExpanded = false
                             }
                         )
                     }

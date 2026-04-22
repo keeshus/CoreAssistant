@@ -20,6 +20,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Description
@@ -50,6 +51,9 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
+import android.content.ContentValues
+import android.os.Build
+import android.provider.MediaStore
 import coil.compose.AsyncImage
 import com.mikepenz.markdown.m3.Markdown
 import kotlinx.coroutines.Dispatchers
@@ -80,6 +84,15 @@ class ChatViewModel(
     private val context: Context,
     private val systemInstruction: String? = null
 ) : ViewModel() {
+    private val _isImageGeneration = mutableStateOf(false)
+    val isImageGeneration: State<Boolean> get() = _isImageGeneration
+
+    init {
+        viewModelScope.launch {
+            _isImageGeneration.value = chatDao.getConversationById(conversationId)?.isImageGeneration ?: false
+        }
+    }
+
     val messages: StateFlow<List<ChatMessage>> = chatDao.getMessagesForConversation(conversationId)
         .map { entities ->
             entities.map { entity ->
@@ -129,6 +142,31 @@ class ChatViewModel(
             withContext(Dispatchers.IO) {
                 chatDao.updateDraft(conversationId, text, System.currentTimeMillis())
             }
+        }
+    }
+
+    private fun saveBase64Image(base64Data: String, mimeType: String): Attachment? {
+        return try {
+            val bytes = Base64.decode(base64Data, Base64.DEFAULT)
+            val extension = when (mimeType) {
+                "image/png" -> "png"
+                "image/jpeg" -> "jpg"
+                "image/webp" -> "webp"
+                else -> "bin"
+            }
+            val fileName = "generated_${System.currentTimeMillis()}_${java.util.UUID.randomUUID().toString().take(8)}.$extension"
+            val file = File(context.filesDir, fileName)
+            FileOutputStream(file).use { it.write(bytes) }
+            
+            Attachment(
+                uri = file.toUri().toString(),
+                mimeType = mimeType,
+                fileName = fileName,
+                fileSize = file.length()
+            )
+        } catch (e: Exception) {
+            android.util.Log.e("ChatViewModel", "Error saving generated image", e)
+            null
         }
     }
 
@@ -267,7 +305,13 @@ class ChatViewModel(
                     return@launch
                 }
 
-                val modelName = settingsManager.geminiModel.first().let {
+                val modelNameFull = if (_isImageGeneration.value) {
+                    settingsManager.imageGenerationModel.first()
+                } else {
+                    settingsManager.geminiModel.first()
+                }
+                
+                val modelName = modelNameFull.let {
                     if (it.startsWith("models/")) it.substringAfter("models/") else it
                 }
                 val isGroundingEnabled = settingsManager.googleGroundingEnabled.first()
@@ -310,6 +354,8 @@ class ChatViewModel(
                         } else if (attachment.remoteUri != null) {
                             parts.add(GeminiPart(fileData = FileData(mimeType = attachment.mimeType, fileUri = attachment.remoteUri)))
                         } else if (attachment.fileSize < 20 * 1024 * 1024) {
+                            // In image generation mode, we also want to send previous images as context
+                            // Even if they don't have a remoteUri yet, we can try to prepare them
                             val part = prepareAttachmentPart(attachment, apiKey)
                             if (part != null) parts.add(part)
                         }
@@ -334,15 +380,20 @@ class ChatViewModel(
                     contents = contents,
                     tools = tools,
                     generationConfig = configuration,
-                    systemInstruction = systemInstruction?.let { Content(parts = listOf(GeminiPart(text = it))) }
+                    systemInstruction = if (_isImageGeneration.value) {
+                        Content(parts = listOf(GeminiPart(text = "You are Nano Banana, an expert image generation assistant. Your primary goal is to generate high-quality images based on user descriptions. You can iterate on previous images if the user asks for changes. Always try to be creative and descriptive.")))
+                    } else {
+                        systemInstruction?.let { Content(parts = listOf(GeminiPart(text = it))) }
+                    }
                 )
                 val response = apiService.generateContent(model = modelName, apiKey = apiKey, request = request)
 
                 val responseText = response.text
                 val responseThought = response.thought
                 val groundingMetadata = response.groundingMetadata
+                val inlineImages = response.inlineImages
                 
-                if (responseText == null) {
+                if (responseText == null && inlineImages.isNullOrEmpty()) {
                     val blockReason = response.candidates?.firstOrNull()?.finishReason 
                         ?: response.promptFeedback?.blockReason
                     
@@ -356,14 +407,19 @@ class ChatViewModel(
                     return@launch
                 }
                 
+                val responseAttachments = inlineImages?.mapNotNull { 
+                    saveBase64Image(it.data, it.mimeType)
+                }
+                
                 withContext(Dispatchers.IO) {
                     chatDao.insertMessage(
                         MessageEntity(
                             conversationId = conversationId,
-                            text = responseText,
+                            text = responseText ?: "",
                             isUser = false,
                             thought = responseThought,
-                            groundingMetadata = groundingMetadata
+                            groundingMetadata = groundingMetadata,
+                            attachments = responseAttachments
                         )
                     )
                 }
@@ -512,11 +568,20 @@ fun ChatScreen(
         viewModel.addAttachments(attachments)
     }
 
+    val isImageGeneration by viewModel.isImageGeneration
+    
     Box(modifier = Modifier.fillMaxSize()) {
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Chat") },
+                title = { 
+                    Column {
+                        Text(if (isImageGeneration) "Nano Banana" else "Chat")
+                        if (isImageGeneration) {
+                            Text("Image Generation Mode", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.secondary)
+                        }
+                    }
+                },
                 navigationIcon = {
                     IconButton(onClick = onNavigateBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
@@ -658,6 +723,42 @@ fun ChatScreen(
         ) {
             ThoughtContent(selectedThought!!)
         }
+    }
+}
+
+fun saveToGallery(context: Context, attachment: Attachment) {
+    try {
+        val uri = attachment.uri.toUri()
+        val inputStream = context.contentResolver.openInputStream(uri) ?: return
+        
+        val contentValues = ContentValues().apply {
+            put(MediaStore.MediaColumns.DISPLAY_NAME, attachment.fileName)
+            put(MediaStore.MediaColumns.MIME_TYPE, attachment.mimeType)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                put(MediaStore.MediaColumns.RELATIVE_PATH, "Pictures/CoreAssistant")
+                put(MediaStore.MediaColumns.IS_PENDING, 1)
+            }
+        }
+
+        val resolver = context.contentResolver
+        val imageUri = resolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, contentValues) ?: return
+
+        resolver.openOutputStream(imageUri).use { outputStream ->
+            if (outputStream != null) {
+                inputStream.copyTo(outputStream)
+            }
+        }
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            contentValues.clear()
+            contentValues.put(MediaStore.MediaColumns.IS_PENDING, 0)
+            resolver.update(imageUri, contentValues, null, null)
+        }
+        
+        android.widget.Toast.makeText(context, "Saved to Gallery", android.widget.Toast.LENGTH_SHORT).show()
+    } catch (e: Exception) {
+        android.util.Log.e("ChatScreen", "Failed to save to gallery", e)
+        android.widget.Toast.makeText(context, "Failed to save", android.widget.Toast.LENGTH_SHORT).show()
     }
 }
 
@@ -862,16 +963,31 @@ fun MessageBubble(
 @Composable
 fun AttachmentPreview(attachment: Attachment) {
     val isImage = attachment.mimeType.startsWith("image/")
+    val context = LocalContext.current
     
     if (isImage) {
-        AsyncImage(
-            model = attachment.uri,
-            contentDescription = attachment.fileName,
-            modifier = Modifier
-                .padding(top = 8.dp)
-                .heightIn(max = 200.dp)
-                .clip(RoundedCornerShape(8.dp))
-        )
+        Box(modifier = Modifier.padding(top = 8.dp)) {
+            AsyncImage(
+                model = attachment.uri,
+                contentDescription = attachment.fileName,
+                modifier = Modifier
+                    .heightIn(max = 240.dp)
+                    .clip(RoundedCornerShape(8.dp))
+            )
+            
+            Row(
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(4.dp)
+                    .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.6f), RoundedCornerShape(8.dp))
+            ) {
+                IconButton(onClick = {
+                    saveToGallery(context, attachment)
+                }, modifier = Modifier.size(32.dp)) {
+                    Icon(Icons.Default.Download, contentDescription = "Save to Gallery", modifier = Modifier.size(18.dp))
+                }
+            }
+        }
     } else {
         Row(
             modifier = Modifier

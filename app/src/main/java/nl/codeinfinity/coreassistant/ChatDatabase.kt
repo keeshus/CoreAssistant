@@ -16,7 +16,8 @@ data class Conversation(
     val title: String,
     val draftText: String = "",
     val lastDraftUpdate: Long = 0,
-    val lastModified: Long = System.currentTimeMillis()
+    val lastModified: Long = System.currentTimeMillis(),
+    val isImageGeneration: Boolean = false
 )
 
 data class Attachment(
@@ -103,8 +104,8 @@ interface ChatDao {
     suspend fun insertMessage(message: MessageEntity): Long
 
     @Transaction
-    suspend fun createNewConversation(title: String): Long {
-        return insertConversation(Conversation(title = title))
+    suspend fun createNewConversation(title: String, isImageGeneration: Boolean = false): Long {
+        return insertConversation(Conversation(title = title, isImageGeneration = isImageGeneration))
     }
     
     @Query("DELETE FROM conversations WHERE id NOT IN (SELECT id FROM conversations ORDER BY lastModified DESC LIMIT :limit)")
@@ -139,7 +140,7 @@ interface GeminiModelDao {
     suspend fun deleteAllModels()
 }
 
-@Database(entities = [Conversation::class, MessageEntity::class, GeminiModelEntity::class], version = 5, exportSchema = false)
+@Database(entities = [Conversation::class, MessageEntity::class, GeminiModelEntity::class], version = 6, exportSchema = false)
 @TypeConverters(Converters::class)
 abstract class ChatDatabase : RoomDatabase() {
     abstract fun chatDao(): ChatDao

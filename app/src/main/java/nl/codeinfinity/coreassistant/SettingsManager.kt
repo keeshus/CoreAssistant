@@ -94,6 +94,7 @@ class SettingsManager(private val context: Context) {
         val GEMINI_API_KEY_SECURE = stringPreferencesKey("gemini_api_key_secure")
         val DB_PASSPHRASE = stringPreferencesKey("db_passphrase")
         val GEMINI_MODEL = stringPreferencesKey("gemini_model")
+        val IMAGE_GENERATION_MODEL = stringPreferencesKey("image_generation_model")
         val GOOGLE_GROUNDING_ENABLED = booleanPreferencesKey("google_grounding_enabled")
         val GEMINI_THINKING_LEVEL = stringPreferencesKey("gemini_thinking_level")
         val CONVERSATIONS_LIMIT = stringPreferencesKey("conversations_limit")
@@ -130,6 +131,10 @@ class SettingsManager(private val context: Context) {
         preferences[GEMINI_MODEL] ?: "gemini-3.0-flash-preview"
     }
 
+    val imageGenerationModel: Flow<String> = context.dataStore.data.map { preferences ->
+        preferences[IMAGE_GENERATION_MODEL] ?: "imagen-3.0-generate-001"
+    }
+
     val googleGroundingEnabled: Flow<Boolean> = context.dataStore.data.map { preferences ->
         preferences[GOOGLE_GROUNDING_ENABLED] ?: false
     }
@@ -152,6 +157,12 @@ class SettingsManager(private val context: Context) {
     suspend fun saveGeminiModel(model: String) {
         context.dataStore.edit { preferences ->
             preferences[GEMINI_MODEL] = model
+        }
+    }
+
+    suspend fun saveImageGenerationModel(model: String) {
+        context.dataStore.edit { preferences ->
+            preferences[IMAGE_GENERATION_MODEL] = model
         }
     }
 
