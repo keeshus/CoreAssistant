@@ -159,7 +159,6 @@ fun SettingsScreen(
     settingsManager: SettingsManager = SettingsManager(LocalContext.current),
     database: ChatDatabase
 ) {
-    val context = LocalContext.current
     val viewModel: SettingsViewModel = viewModel(factory = object : androidx.lifecycle.ViewModelProvider.Factory {
         @Suppress("UNCHECKED_CAST")
         override fun <T : ViewModel> create(modelClass: Class<T>): T {

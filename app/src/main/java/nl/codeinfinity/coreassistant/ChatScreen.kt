@@ -1,9 +1,11 @@
 package nl.codeinfinity.coreassistant
 
+import android.content.ContentValues
 import android.content.Context
-import android.graphics.Color
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
+import android.os.Build
+import android.provider.MediaStore
 import android.provider.OpenableColumns
 import android.util.Base64
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -21,28 +23,15 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Send
-import androidx.compose.material.icons.filled.Download
-import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.Description
-import androidx.compose.material.icons.filled.ContentCopy
-import androidx.compose.material.icons.filled.Language
-import androidx.compose.material.icons.filled.Psychology
-import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
-import androidx.compose.ui.graphics.Color as ComposeColor
-import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.input.key.*
-import androidx.compose.ui.platform.LocalConfiguration
-import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalClipboardManager
-import androidx.compose.ui.platform.LocalSoftwareKeyboardController
-import androidx.compose.ui.platform.LocalUriHandler
+import androidx.compose.ui.platform.*
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -56,9 +45,6 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
-import android.content.ContentValues
-import android.os.Build
-import android.provider.MediaStore
 import coil.compose.AsyncImage
 import com.mikepenz.markdown.m3.Markdown
 import kotlinx.coroutines.Dispatchers
@@ -71,6 +57,7 @@ import okhttp3.MultipartBody
 import okhttp3.RequestBody.Companion.asRequestBody
 import java.io.File
 import java.io.FileOutputStream
+import androidx.compose.ui.graphics.Color as ComposeColor
 import nl.codeinfinity.coreassistant.Part as GeminiPart
 
 data class ChatMessage(
