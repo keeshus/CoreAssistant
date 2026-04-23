@@ -7,14 +7,17 @@ A privacy-focused, lightweight LLM chat application for Android, powered by the 
 - **Gemini AI Chat**: Engage in intelligent conversations using various Gemini models (Flash, Pro, etc.).
 - **Auto-Save Drafts**: Never lose what you type. Your message drafts are saved at short intervals for every conversation.
 - **Multimodal Support**: Send images and files along with your text prompts for visual analysis and document processing.
+- **Image Generation**: Generate high-quality images from text descriptions using models like Imagen 3.
 - **Model Thinking**: View the model's internal "thought" process to understand how it arrived at an answer.
 - **Google Grounding**: Enable real-time search grounding to get up-to-date information with verifiable sources.
 - **Privacy & Security**:
     - **Encrypted Database**: All chat history and drafts are stored locally using SQLCipher encryption.
     - **Screenshot Protection**: Block screenshots and hide app content in the recent apps switcher.
     - **Auto-Clear History**: Optional setting to automatically delete all conversations when the app is closed.
+    - **Conversation Limits**: Automatically prune old conversations to save space and maintain privacy.
 - **Customization**:
     - Choose from different Gemini models.
+    - Select your preferred Image Generation model.
     - Adjust "Thinking Level" for supported models.
     - Personalize your name for the AI.
 
