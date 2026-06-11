@@ -7,7 +7,7 @@ plugins {
 
 android {
     namespace = "nl.codeinfinity.coreassistant"
-    compileSdk = 36
+    compileSdk = 37
 
     defaultConfig {
         applicationId = "nl.codeinfinity.coreassistant"
