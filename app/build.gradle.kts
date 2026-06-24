@@ -99,6 +99,10 @@ dependencies {
     // SQLCipher for encrypted database
     implementation("net.zetetic:android-database-sqlcipher:4.5.4")
 
+    // Room testing
+    testImplementation("androidx.room:room-testing:2.8.4")
+    testImplementation("org.robolectric:robolectric:4.14.1")
+
     // Tests
     testImplementation("junit:junit:4.13.2")
     testImplementation("io.mockk:mockk:1.13.12")
