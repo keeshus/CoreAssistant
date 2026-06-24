@@ -101,6 +101,7 @@ class SettingsManager(private val context: Context) {
         val USER_NAME = stringPreferencesKey("user_name")
         val SCREENSHOT_PROTECTION = booleanPreferencesKey("screenshot_protection")
         val CLEAR_HISTORY_ON_CLOSE = booleanPreferencesKey("clear_history_on_close")
+        val DARK_MODE = stringPreferencesKey("dark_mode")
     }
 
     val screenshotProtection: Flow<Boolean> = context.dataStore.data.map { preferences ->
@@ -120,6 +121,16 @@ class SettingsManager(private val context: Context) {
     suspend fun saveClearHistoryOnClose(enabled: Boolean) {
         context.dataStore.edit { preferences ->
             preferences[CLEAR_HISTORY_ON_CLOSE] = enabled
+        }
+    }
+
+    val darkMode: Flow<String> = context.dataStore.data.map { preferences ->
+        preferences[DARK_MODE] ?: "system"
+    }
+
+    suspend fun saveDarkMode(mode: String) {
+        context.dataStore.edit { preferences ->
+            preferences[DARK_MODE] = mode
         }
     }
 

@@ -56,6 +56,9 @@ class SettingsViewModel(
     val clearHistoryOnClose: StateFlow<Boolean> = settingsManager.clearHistoryOnClose
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
 
+    val darkMode: StateFlow<String> = settingsManager.darkMode
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "system")
+
     val availableModels: StateFlow<List<GeminiModel>> = database.geminiModelDao().getAllModels()
         .map { entities ->
             entities.map { entity ->
@@ -144,6 +147,12 @@ class SettingsViewModel(
         }
     }
 
+    fun saveDarkMode(mode: String) {
+        viewModelScope.launch {
+            settingsManager.saveDarkMode(mode)
+        }
+    }
+
     fun saveUserName(name: String) {
         viewModelScope.launch {
             settingsManager.saveUserName(name)
@@ -175,6 +184,7 @@ fun SettingsScreen(
     val thinkingLevel by viewModel.thinkingLevel.collectAsState()
     val screenshotProtection by viewModel.screenshotProtection.collectAsState()
     val clearHistoryOnClose by viewModel.clearHistoryOnClose.collectAsState()
+    val darkModePref by viewModel.darkMode.collectAsState()
     val availableModels by viewModel.availableModels.collectAsState()
 
     var apiKey by remember { mutableStateOf("") }
@@ -196,6 +206,7 @@ fun SettingsScreen(
     var expanded by remember { mutableStateOf(false) }
     var imageExpanded by remember { mutableStateOf(false) }
     var thinkingExpanded by remember { mutableStateOf(false) }
+    var darkModeExpanded by remember { mutableStateOf(false) }
     var apiKeyVisible by remember { mutableStateOf(false) }
 
     Scaffold(
@@ -343,6 +354,36 @@ fun SettingsScreen(
                             onClick = {
                                 viewModel.saveThinkingLevel(level)
                                 thinkingExpanded = false
+                            }
+                        )
+                    }
+                }
+            }
+
+            Box(modifier = Modifier.fillMaxWidth()) {
+                OutlinedTextField(
+                    value = darkModePref.replaceFirstChar { it.uppercase() },
+                    onValueChange = { },
+                    readOnly = true,
+                    label = { Text("Dark Mode") },
+                    modifier = Modifier.fillMaxWidth(),
+                    trailingIcon = {
+                        IconButton(onClick = { darkModeExpanded = true }) {
+                            Icon(Icons.Default.ArrowDropDown, contentDescription = null)
+                        }
+                    }
+                )
+                DropdownMenu(
+                    expanded = darkModeExpanded,
+                    onDismissRequest = { darkModeExpanded = false },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    listOf("system", "light", "dark").forEach { mode ->
+                        DropdownMenuItem(
+                            text = { Text(mode.replaceFirstChar { it.uppercase() }) },
+                            onClick = {
+                                viewModel.saveDarkMode(mode)
+                                darkModeExpanded = false
                             }
                         )
                     }
