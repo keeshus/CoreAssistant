@@ -29,3 +29,4 @@ export PATH=$JAVA_HOME/bin:$PATH
 - **Navigation**: Defined in `MainActivity.kt` via `NavHost`. Routes: `setup`, `conversations`, `chat/{conversationId}`, `settings`, `licenses`.
 - **Database**: `ChatDatabase` (Room) with encrypted SQLCipher. DAOs: `chatDao()`, `geminiModelDao()`.
 - **API**: `GeminiApiService` Retrofit interface. Models are fetched and cached in Room.
+- **Color Scheme**: Custom Material 3 blue-based scheme defined in `MainActivity.kt` as `CustomLightColorScheme` and `CustomDarkColorScheme`, generated via the Material Design tool with primary key `#1565C0`.
