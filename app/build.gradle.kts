@@ -41,6 +41,23 @@ android {
         compose = true
     }
 
+    testOptions {
+        unitTests {
+            isIncludeAndroidResources = true
+        }
+    }
+
+    sourceSets {
+        getByName("test") {
+            manifest.srcFile("src/test/AndroidManifest.xml")
+        }
+    }
+
+    tasks.withType<Test> {
+        val testManifest = layout.buildDirectory.file("intermediates/packaged_manifests/debugUnitTest/processDebugUnitTestManifest/AndroidManifest.xml")
+        systemProperty("android_merged_manifest", testManifest.get().asFile.absolutePath)
+    }
+
     packaging {
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
@@ -108,4 +125,12 @@ dependencies {
     testImplementation("io.mockk:mockk:1.13.12")
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.11.0")
     testImplementation("app.cash.turbine:turbine:1.1.0")
+
+    // Compose UI testing
+    testImplementation("androidx.compose.ui:ui-test-junit4")
+    testImplementation("androidx.compose.ui:ui-test-manifest")
+
+    // API testing
+    testImplementation("com.squareup.okhttp3:mockwebserver:4.12.0")
+    testImplementation("androidx.test:core:1.6.1")
 }
