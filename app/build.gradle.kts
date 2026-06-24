@@ -98,4 +98,10 @@ dependencies {
 
     // SQLCipher for encrypted database
     implementation("net.zetetic:android-database-sqlcipher:4.5.4")
+
+    // Tests
+    testImplementation("junit:junit:4.13.2")
+    testImplementation("io.mockk:mockk:1.13.12")
+    testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.11.0")
+    testImplementation("app.cash.turbine:turbine:1.1.0")
 }
