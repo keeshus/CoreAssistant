@@ -131,6 +131,6 @@ dependencies {
     testImplementation("androidx.compose.ui:ui-test-manifest")
 
     // API testing
-    testImplementation("com.squareup.okhttp3:mockwebserver:4.12.0")
+    testImplementation("com.squareup.okhttp3:mockwebserver:5.4.0")
     testImplementation("androidx.test:core:1.7.0")
 }
